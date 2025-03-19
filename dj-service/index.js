@@ -1,0 +1,207 @@
+// dj-service/index.js
+const express = require('express');
+const cors = require('cors');
+const mysql = require('mysql2/promise');
+
+// Load env vars or define defaults
+const DB_HOST = process.env.DB_HOST || '127.0.0.1';
+const DB_PORT = process.env.DB_PORT || '3306';
+const DB_USER = process.env.DB_USER || 'root';
+const DB_PASSWORD = process.env.DB_PASSWORD || 'UTav@2523';
+const DB_NAME = process.env.DB_NAME || 'gigsdb';
+const API_PORT = process.env.API_PORT || 4002;
+
+// Create a connection pool
+const pool = mysql.createPool({
+  host: DB_HOST,
+  port: DB_PORT,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+const app = express();
+app.use(express.json());
+app.use(cors());
+
+/**
+ * GET /djs
+ * Fetch all DJs
+ */
+app.get('/djs', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM djs');
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching DJs:', err);
+    res.status(500).json({ error: 'Failed to fetch DJs' });
+  }
+});
+
+/**
+ * GET /djs/:dj_id
+ * Fetch one DJ by ID
+ */
+app.get('/djs/:dj_id', async (req, res) => {
+  const djId = parseInt(req.params.dj_id, 10);
+  try {
+    const [rows] = await pool.query('SELECT * FROM djs WHERE dj_id = ?', [djId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'DJ not found' });
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Error retrieving DJ:', err);
+    res.status(500).json({ error: 'Failed to retrieve DJ' });
+  }
+});
+
+/**
+ * POST /djs
+ * Create a new DJ record
+ */
+app.post('/djs', async (req, res) => {
+  // Extract fields from request body
+  const {
+    dj_name,
+    instagram,
+    email,
+    genres,
+    soundcloud,
+    city,
+    phone,
+    numeric_fee
+  } = req.body;
+
+  // 'dj_name' is required
+  if (!dj_name) {
+    return res.status(400).json({ error: 'Missing required field: dj_name' });
+  }
+
+  // Convert numeric_fee to float or default to 0
+  const feeValue = numeric_fee ? parseFloat(numeric_fee) : 0.0;
+
+  try {
+    // Insert into 'djs' table
+    await pool.execute(
+      `INSERT INTO djs
+        (dj_name, instagram, email, genres, soundcloud, city, phone, numeric_fee)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        dj_name,
+        instagram || '',
+        email || '',
+        genres || '',
+        soundcloud || '',
+        city || '',
+        phone || '',
+        feeValue
+      ]
+    );
+
+    // Return the newly created record
+    const [rows] = await pool.query(
+      'SELECT * FROM djs ORDER BY dj_id DESC LIMIT 1'
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error('Error creating DJ:', err);
+    res.status(500).json({ error: 'Failed to create DJ' });
+  }
+});
+
+/**
+ * PUT /djs/:dj_id
+ * Update an existing DJ by ID
+ */
+app.put('/djs/:dj_id', async (req, res) => {
+  const djId = parseInt(req.params.dj_id, 10);
+
+  // Extract fields from request body
+  const {
+    dj_name,
+    instagram,
+    email,
+    genres,
+    soundcloud,
+    city,
+    phone,
+    numeric_fee
+  } = req.body;
+
+  // 'dj_name' is still required for updates
+  if (!dj_name) {
+    return res.status(400).json({ error: 'Missing required field: dj_name' });
+  }
+
+  // Check if the DJ exists
+  try {
+    const [existing] = await pool.query('SELECT * FROM djs WHERE dj_id = ?', [djId]);
+    if (existing.length === 0) {
+      return res.status(404).json({ error: 'DJ not found' });
+    }
+
+    // Parse numeric fee or fallback to 0
+    const feeValue = numeric_fee ? parseFloat(numeric_fee) : 0.0;
+
+    // Update
+    await pool.execute(
+      `UPDATE djs
+         SET dj_name = ?,
+             instagram = ?,
+             email = ?,
+             genres = ?,
+             soundcloud = ?,
+             city = ?,
+             phone = ?,
+             numeric_fee = ?
+       WHERE dj_id = ?`,
+      [
+        dj_name,
+        instagram || '',
+        email || '',
+        genres || '',
+        soundcloud || '',
+        city || '',
+        phone || '',
+        feeValue,
+        djId
+      ]
+    );
+
+    // Return the updated record
+    const [updated] = await pool.query('SELECT * FROM djs WHERE dj_id = ?', [djId]);
+    res.json(updated[0]);
+  } catch (err) {
+    console.error('Error updating DJ:', err);
+    res.status(500).json({ error: 'Failed to update DJ' });
+  }
+});
+
+/**
+ * DELETE /djs/:dj_id
+ * Delete a DJ record
+ */
+app.delete('/djs/:dj_id', async (req, res) => {
+  const djId = parseInt(req.params.dj_id, 10);
+  try {
+    // Check if it exists
+    const [existing] = await pool.query('SELECT * FROM djs WHERE dj_id = ?', [djId]);
+    if (existing.length === 0) {
+      return res.status(404).json({ error: 'DJ not found' });
+    }
+
+    await pool.execute('DELETE FROM djs WHERE dj_id = ?', [djId]);
+    res.json({ message: 'DJ deleted', dj: existing[0] });
+  } catch (err) {
+    console.error('Error deleting DJ:', err);
+    res.status(500).json({ error: 'Failed to delete DJ' });
+  }
+});
+
+app.listen(API_PORT, () => {
+  console.log(`DJ Service running on port ${API_PORT}`);
+});

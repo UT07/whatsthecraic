@@ -1,0 +1,182 @@
+[
+  {
+    "event_name": "Hard Techno Night w/ CHACHØU",
+    "classification_name": "Electronic",
+    "city": "Dublin",
+    "date_local": "2024-02-10",
+    "time_local": "21:00:00",
+    "venue_name": "The Academy",
+    "url": "https://mylocal.events/techno-chachou"
+  },
+  {
+    "event_name": "House & Tech Fest feat. ikigai3000",
+    "classification_name": "House",
+    "city": "Cork",
+    "date_local": "2024-03-05",
+    "time_local": "20:00:00",
+    "venue_name": "Button Factory",
+    "url": "https://mylocal.events/house_tech_fest"
+  },
+  {
+    "event_name": "Progressive Beats feat. Strukture",
+    "classification_name": "Electronic",
+    "city": "Galway",
+    "date_local": "2024-04-01",
+    "time_local": "23:00:00",
+    "venue_name": "District 8",
+    "url": "https://mylocal.events/progbeats_strukture"
+  },
+  {
+    "event_name": "Dub & Bass Rendezvous w/ Fizzy",
+    "classification_name": "Various",
+    "city": "Dublin",
+    "date_local": "2024-05-15",
+    "time_local": "19:00:00",
+    "venue_name": "Workman's Club",
+    "url": "https://mylocal.events/dub_bass_rendezvous"
+  },
+  {
+    "event_name": "Midnight Rave w/ Tech Noir",
+    "classification_name": "Techno",
+    "city": "Dublin",
+    "date_local": "2024-06-20",
+    "time_local": "22:00:00",
+    "venue_name": "Wigwam",
+    "url": "https://mylocal.events/midnight_techno"
+  },
+  {
+    "event_name": "Afrohouse Explosion feat. Mswenkocee",
+    "classification_name": "Electronic",
+    "city": "Dublin",
+    "date_local": "2024-07-12",
+    "time_local": "21:00:00",
+    "venue_name": "Opium",
+    "url": "https://mylocal.events/afro_explosion"
+  },
+  {
+    "event_name": "Sunset Tech Bash w/ Lørex",
+    "classification_name": "Techno",
+    "city": "Galway",
+    "date_local": "2024-08-08",
+    "time_local": "20:00:00",
+    "venue_name": "The Grand Social",
+    "url": "https://mylocal.events/sunset_lorex"
+  },
+  {
+    "event_name": "Deep House Session w/ Fizzy Waters",
+    "classification_name": "House",
+    "city": "Cork",
+    "date_local": "2024-09-10",
+    "time_local": "21:30:00",
+    "venue_name": "Lucky's",
+    "url": "https://mylocal.events/deephouse_fizzywaters"
+  },
+  {
+    "event_name": "Breaks & Bass w/ DJ haze",
+    "classification_name": "Various",
+    "city": "Dublin",
+    "date_local": "2024-10-15",
+    "time_local": "19:30:00",
+    "venue_name": "Soundhouse",
+    "url": "https://mylocal.events/breaks_bass_haze"
+  },
+  {
+    "event_name": "Melodic Techno Showcase w/ Ksara",
+    "classification_name": "Electronic",
+    "city": "Dublin",
+    "date_local": "2024-11-01",
+    "time_local": "22:00:00",
+    "venue_name": "TheBackPage",
+    "url": "https://mylocal.events/melodic_ksara"
+  },
+  {
+    "event_name": "Garage & Bass w/ Dj Gwada Mike",
+    "classification_name": "Various",
+    "city": "Cork",
+    "date_local": "2024-12-05",
+    "time_local": "23:00:00",
+    "venue_name": "Fidelity",
+    "url": "https://mylocal.events/garage_gwada"
+  },
+  {
+    "event_name": "Racket Rave w/ KIRSTY",
+    "classification_name": "Techno",
+    "city": "Dublin",
+    "date_local": "2025-01-10",
+    "time_local": "21:00:00",
+    "venue_name": "Bernard Shaw/Racket",
+    "url": "https://mylocal.events/racket_kirsty"
+  },
+  {
+    "event_name": "Deep Progressive House w/ RJ the DJ",
+    "classification_name": "House",
+    "city": "Galway",
+    "date_local": "2025-02-12",
+    "time_local": "20:00:00",
+    "venue_name": "TheBigRomance",
+    "url": "https://mylocal.events/deepprog_rj"
+  },
+  {
+    "event_name": "Acid & Hard Tech Marathon w/ Curley",
+    "classification_name": "Electronic",
+    "city": "Dublin",
+    "date_local": "2025-03-07",
+    "time_local": "22:30:00",
+    "venue_name": "Grand social",
+    "url": "https://mylocal.events/acid_curley"
+  },
+  {
+    "event_name": "Late-Night Bash w/ Ashanti Doran",
+    "classification_name": "Electronic",
+    "city": "Dublin",
+    "date_local": "2025-04-18",
+    "time_local": "23:00:00",
+    "venue_name": "Cellar",
+    "url": "https://mylocal.events/latenight_ashanti"
+  },
+  {
+    "event_name": "Hardgroove Invasion w/ Alp Bagci",
+    "classification_name": "Electronic",
+    "city": "Dublin",
+    "date_local": "2025-05-10",
+    "time_local": "20:00:00",
+    "venue_name": "PYG",
+    "url": "https://mylocal.events/hardgroove_alp"
+  },
+  {
+    "event_name": "Nu-Disco & House w/ Mswenkocee",
+    "classification_name": "House",
+    "city": "Cork",
+    "date_local": "2025-06-20",
+    "time_local": "19:00:00",
+    "venue_name": "Pawn Shop",
+    "url": "https://mylocal.events/nudisco_mswenkocee"
+  },
+  {
+    "event_name": "Peak Time Techno w/ Tech Noir",
+    "classification_name": "Techno",
+    "city": "Dublin",
+    "date_local": "2025-07-05",
+    "time_local": "21:30:00",
+    "venue_name": "Izakaya/Tengu",
+    "url": "https://mylocal.events/peaktime_noir"
+  },
+  {
+    "event_name": "DNB & Jungle w/ Fizzy Waters",
+    "classification_name": "Various",
+    "city": "Galway",
+    "date_local": "2025-08-11",
+    "time_local": "22:00:00",
+    "venue_name": "Hen'sTeeth",
+    "url": "https://mylocal.events/dnb_fizzywaters"
+  },
+  {
+    "event_name": "Funky Beats w/ ikigai3000",
+    "classification_name": "Electronic",
+    "city": "Dublin",
+    "date_local": "2025-09-15",
+    "time_local": "21:00:00",
+    "venue_name": "Lost Lane",
+    "url": "https://mylocal.events/funky_ikigai3000"
+  }
+]
