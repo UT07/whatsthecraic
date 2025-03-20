@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  # 1) Local Events Service
+  local-events:
+    image: 395338916491.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/events-service:latest
+    container_name: local_events_service
+    ports:
+      - "4003:4003"
+    env_file:
+      - .env
+    environment:
+      DB_HOST: "${DB_HOST}"
+      DB_PORT: "${DB_PORT}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      DB_NAME: "${DB_NAME}"
+    depends_on:
+      - dj-service
+      - venue-service
+
+  # 2) DJ Service
+  dj-service:
+    image: 395338916491.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/dj-service:latest
+    container_name: dj_service
+    ports:
+      - "4002:4002"
+    env_file:
+      - .env
+    environment:
+      DB_HOST: "${DB_HOST}"
+      DB_PORT: "${DB_PORT}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      DB_NAME: "${DB_NAME}"
+
+  # 3) Venue Service
+  venue-service:
+    image: 395338916491.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/venue-service:latest
+    container_name: venue_service
+    ports:
+      - "4001:4001"
+    env_file:
+      - .env
+    environment:
+      DB_HOST: "${DB_HOST}"
+      DB_PORT: "${DB_PORT}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      DB_NAME: "${DB_NAME}"
+
+  # 4) Aggregator Service
+  aggregator:
+    image: 395338916491.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/aggregator-service:latest
+    container_name: aggregator_service
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      # Database details
+      DB_HOST: "${DB_HOST}"
+      DB_PORT: "${DB_PORT}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      DB_NAME: "${DB_NAME}"
+
+      # URLs for microservices
+      VENUE_SERVICE_URL: "http://venue-service:4001"
+      DJ_SERVICE_URL: "http://dj-service:4002"
+      LOCAL_EVENTS_URL: "http://local-events:4003"
+
+      # Ticketmaster Key
+      TICKETMASTER_API_KEY: "${TICKETMASTER_API_KEY}"
+    depends_on:
+      - local-events
+      - dj-service
+      - venue-service

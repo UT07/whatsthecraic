@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Deploy GigFinder Microservices on AWS ECS (Fargate)"
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: "VPC ID for deployment"
+  Subnets:
+    Type: CommaDelimitedList
+    Description: "Subnets for ECS Tasks"
+  AggregatorImage:
+    Type: String
+    Description: "ECR Image URL for Aggregator Service"
+  DjServiceImage:
+    Type: String
+    Description: "ECR Image URL for DJ Service"
+  EventsServiceImage:
+    Type: String
+    Description: "ECR Image URL for Events Service"
+  VenueServiceImage:
+    Type: String
+    Description: "ECR Image URL for Venue Service"
+  RdsEndpoint:
+    Type: String
+    Description: "RDS Endpoint for Database"
+  DBUser:
+    Type: String
+    Description: "Database Username"
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: "Database Password"
+  TicketmasterApiKey:
+    Type: String
+    Description: "API Key for Ticketmaster"
+
+Resources:
+  # 1) ECS Cluster
+  GigFinderCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: GigFinderCluster
+
+  # 2) Application Load Balancer
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: GigFinderALB
+      Subnets: !Ref Subnets
+      SecurityGroups:
+        - !GetAtt LoadBalancerSG.GroupId
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: "60"
+      Type: application
+
+  # 3) Load Balancer Security Group
+  LoadBalancerSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for Load Balancer"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+
+  # 4) Task Execution Role
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ECSTaskExecutionRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # 5) ECS Task Definitions
+  AggregatorTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: AggregatorService
+      Cpu: "256"
+      Memory: "512"
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: AggregatorContainer
+          Image: !Ref AggregatorImage
+          PortMappings:
+            - ContainerPort: 4000
+          Environment:
+            - Name: DB_HOST
+              Value: !Ref RdsEndpoint
+            - Name: DB_USER
+              Value: !Ref DBUser
+            - Name: DB_PASSWORD
+              Value: !Ref DBPassword
+            - Name: DB_NAME
+              Value: "gigsdb"
+            - Name: VENUE_SERVICE_URL
+              Value: "http://venue-service:4001"
+            - Name: DJ_SERVICE_URL
+              Value: "http://dj-service:4002"
+            - Name: LOCAL_EVENTS_URL
+              Value: "http://local-events:4003"
+            - Name: TICKETMASTER_API_KEY
+              Value: !Ref TicketmasterApiKey
+
+  # Similar ECS Task Definitions for other services
+  DjServiceTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: DjService
+      Cpu: "256"
+      Memory: "512"
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: DjContainer
+          Image: !Ref DjServiceImage
+          PortMappings:
+            - ContainerPort: 4002
+          Environment:
+            - Name: DB_HOST
+              Value: !Ref RdsEndpoint
+            - Name: DB_USER
+              Value: !Ref DBUser
+            - Name: DB_PASSWORD
+              Value: !Ref DBPassword
+            - Name: DB_NAME
+              Value: "gigsdb"
+
+  # 6) ECS Services
+  AggregatorService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref GigFinderCluster
+      TaskDefinition: !Ref AggregatorTask
+      LaunchType: FARGATE
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref Subnets
+          AssignPublicIp: ENABLED
+
+  # Similarly define other services...
+
+Outputs:
+  LoadBalancerDNS:
+    Description: "URL for the Application Load Balancer"
+    Value: !GetAtt LoadBalancer.DNSName
