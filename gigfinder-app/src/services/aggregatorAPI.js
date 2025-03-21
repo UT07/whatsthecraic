@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE = process.env.REACT_APP_API_BASE;
+const API_BASE = 'https://habzfli817.execute-api.eu-west-1.amazonaws.com/prod';
 
 const aggregatorAPI = {
   searchEvents: async (filters) => {
