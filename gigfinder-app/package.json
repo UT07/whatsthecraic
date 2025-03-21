@@ -2,12 +2,15 @@
   "name": "gigfinder-app",
   "version": "0.1.0",
   "private": true,
+  "proxy": "http://whatsthecraic-alb-1707904777.eu-west-1.elb.amazonaws.com",
   "dependencies": {
     "@aws-amplify/auth": "^6.11.6",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
     "@testing-library/user-event": "^13.5.0",
+    "ajv": "^6.12.6",
+    "ajv-keywords": "^3.5.2",
     "aws-amplify": "^6.13.6",
     "axios": "^1.8.4",
     "chart.js": "^4.4.8",
@@ -21,6 +24,7 @@
     "react-hook-form": "^7.54.2",
     "react-router-dom": "^7.4.0",
     "react-vis": "^1.12.1",
+    "react-wordcloud": "^1.2.7",
     "tailwindcss": "^2.2.19",
     "web-vitals": "^2.1.4"
   },
@@ -54,4 +58,6 @@
     "autoprefixer": "^10.4.21",
     "react-scripts": "^5.0.1"
   }
+  
+  
 }

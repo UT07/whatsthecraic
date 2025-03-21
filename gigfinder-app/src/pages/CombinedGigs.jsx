@@ -6,7 +6,8 @@ import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 
 const CombinedGigs = () => {
-  const [events, setEvents] = useState([]);
+  const [defaultEvents, setDefaultEvents] = useState([]);
+  const [searchResults, setSearchResults] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -22,7 +23,8 @@ const CombinedGigs = () => {
   const fetchEvents = () => {
     eventsAPI.getAllEvents()
       .then((data) => {
-        setEvents(data);
+        console.log("Default events fetched:", data);
+        setDefaultEvents(data);
         setLoading(false);
       })
       .catch((error) => {
@@ -52,6 +54,7 @@ const CombinedGigs = () => {
         .then(() => {
           alert("Event updated successfully");
           fetchEvents();
+          setSearchResults(null);
           closeModal();
         })
         .catch(error => {
@@ -63,6 +66,7 @@ const CombinedGigs = () => {
         .then(() => {
           alert("Event added successfully");
           fetchEvents();
+          setSearchResults(null);
           closeModal();
         })
         .catch(error => {
@@ -78,6 +82,7 @@ const CombinedGigs = () => {
         .then(() => {
           alert("Event deleted successfully");
           fetchEvents();
+          setSearchResults(null);
         })
         .catch((error) => {
           console.error("Error deleting event:", error);
@@ -89,8 +94,24 @@ const CombinedGigs = () => {
   const handleSearch = () => {
     setLoading(true);
     aggregatorAPI.searchEvents(filters)
-      .then((data) => {
-        setEvents(data);
+      .then((responseData) => {
+        console.log("Search returned:", responseData);
+        let results = [];
+
+        // Convert responseData into a flat array if needed
+        if (Array.isArray(responseData)) {
+          results = responseData;
+        } else if (responseData && Array.isArray(responseData.data)) {
+          results = responseData.data;
+        } else if (responseData && typeof responseData === 'object') {
+          // Convert the object's values into a single flat array
+          results = Object.values(responseData).flat();
+        } else {
+          console.error("Unexpected search response structure:", responseData);
+        }
+
+        console.log("Unwrapped search results:", results);
+        setSearchResults(results);
         setLoading(false);
       })
       .catch((error) => {
@@ -98,6 +119,9 @@ const CombinedGigs = () => {
         setLoading(false);
       });
   };
+
+  // Determine which events to display:
+  const eventsToDisplay = searchResults !== null ? searchResults : defaultEvents;
 
   return (
     <div>
@@ -151,40 +175,57 @@ const CombinedGigs = () => {
             Add Event
           </button>
         </div>
+        {searchResults !== null && (
+          <p className="text-yellow-300 mb-2">
+            Showing search results ({eventsToDisplay.length} found). Clear filters to see default events.
+          </p>
+        )}
       </div>
 
       {loading ? (
         <p className="text-green-400">Loading events...</p>
       ) : (
-        // Two-column responsive grid
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {events.map(event => (
-            <motion.div
-              key={event.id}
-              className="bg-gray-800 p-4 rounded flex flex-col transform transition-all duration-300 hover:scale-105"
-            >
-              <h2 className="text-xl mb-2">{event.event_name}</h2>
-              <p><strong>Venue:</strong> {event.venue_name}</p>
-              <p><strong>Date:</strong> {event.date_local} {event.time_local}</p>
-              <p><strong>City:</strong> {event.city}</p>
-              <p><strong>Genre:</strong> {event.classification_name}</p>
-              <p><strong>URL:</strong> {event.url}</p>
-              <div className="flex space-x-2 mt-2">
-                <button 
-                  onClick={() => openModal(event)}
-                  className="bg-blue-500 px-3 py-1 rounded hover:bg-blue-600"
+          {eventsToDisplay.length === 0 ? (
+            <p className="text-red-400">No events found.</p>
+          ) : (
+            eventsToDisplay.map((event, index) => {
+              console.log("Event item:", event); // Log each event to see the actual properties
+              return (
+                <motion.div
+                  key={event.id || index}
+                  className="bg-gray-800 p-4 rounded flex flex-col transform transition-all duration-300 hover:scale-105"
                 >
-                  Edit
-                </button>
-                <button 
-                  onClick={() => handleDeleteEvent(event.id)}
-                  className="bg-red-500 px-3 py-1 rounded hover:bg-red-600"
-                >
-                  Delete
-                </button>
-              </div>
-            </motion.div>
-          ))}
+                  {/* 
+                    Update the JSX to match the actual property names from the console log:
+                    eventName, date, time, venue, address, etc. 
+                  */}
+                  <h2 className="text-xl mb-2">{event.eventName}</h2>
+                  <p><strong>Venue:</strong> {event.venue}</p>
+                  <p><strong>Date:</strong> {event.date} {event.time}</p>
+                  <p><strong>Address:</strong> {event.address}</p>
+                  {/* If you have city or genre in the object, show them similarly:
+                      <p><strong>City:</strong> {event.city}</p>
+                      <p><strong>Genre:</strong> {event.genre}</p> 
+                  */}
+                  <div className="flex space-x-2 mt-2">
+                    <button 
+                      onClick={() => openModal(event)}
+                      className="bg-blue-500 px-3 py-1 rounded hover:bg-blue-600"
+                    >
+                      Edit
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteEvent(event.id)}
+                      className="bg-red-500 px-3 py-1 rounded hover:bg-red-600"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
         </div>
       )}
 
@@ -196,35 +237,39 @@ const CombinedGigs = () => {
             <form onSubmit={handleSubmit(onSubmit)}>
               <div className="mb-4">
                 <label className="block mb-1">Event Name</label>
-                <input type="text" {...register("event_name", { required: true })} className="w-full p-2 rounded bg-gray-800" />
-              </div>
-              <div className="mb-4">
-                <label className="block mb-1">Classification (Genre)</label>
-                <input type="text" {...register("classification_name")} className="w-full p-2 rounded bg-gray-800" />
-              </div>
-              <div className="mb-4">
-                <label className="block mb-1">City</label>
-                <input type="text" {...register("city")} className="w-full p-2 rounded bg-gray-800" />
+                <input type="text" {...register("eventName", { required: true })} className="w-full p-2 rounded bg-gray-800" />
               </div>
               <div className="mb-4">
                 <label className="block mb-1">Date</label>
-                <input type="date" {...register("date_local")} className="w-full p-2 rounded bg-gray-800" />
+                <input type="date" {...register("date")} className="w-full p-2 rounded bg-gray-800" />
               </div>
               <div className="mb-4">
                 <label className="block mb-1">Time</label>
-                <input type="time" {...register("time_local")} className="w-full p-2 rounded bg-gray-800" />
+                <input type="time" {...register("time")} className="w-full p-2 rounded bg-gray-800" />
               </div>
               <div className="mb-4">
-                <label className="block mb-1">Venue Name</label>
-                <input type="text" {...register("venue_name", { required: true })} className="w-full p-2 rounded bg-gray-800" />
+                <label className="block mb-1">Venue</label>
+                <input type="text" {...register("venue", { required: true })} className="w-full p-2 rounded bg-gray-800" />
               </div>
               <div className="mb-4">
-                <label className="block mb-1">URL</label>
-                <input type="text" {...register("url")} className="w-full p-2 rounded bg-gray-800" />
+                <label className="block mb-1">Address</label>
+                <input type="text" {...register("address")} className="w-full p-2 rounded bg-gray-800" />
               </div>
+              {/* 
+                If you also want city, genre, or other fields, add them here to match your actual data. 
+                For example:
+                <div className="mb-4">
+                  <label className="block mb-1">City</label>
+                  <input type="text" {...register("city")} className="w-full p-2 rounded bg-gray-800" />
+                </div>
+              */}
               <div className="flex justify-end space-x-2">
-                <button type="button" onClick={closeModal} className="bg-gray-500 px-4 py-2 rounded hover:bg-gray-600">Cancel</button>
-                <button type="submit" className="bg-green-500 px-4 py-2 rounded hover:bg-green-600">{editingEvent ? 'Update' : 'Add'}</button>
+                <button type="button" onClick={closeModal} className="bg-gray-500 px-4 py-2 rounded hover:bg-gray-600">
+                  Cancel
+                </button>
+                <button type="submit" className="bg-green-500 px-4 py-2 rounded hover:bg-green-600">
+                  {editingEvent ? 'Update' : 'Add'}
+                </button>
               </div>
             </form>
           </div>
