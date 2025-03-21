@@ -2,7 +2,6 @@
   "name": "gigfinder-app",
   "version": "0.1.0",
   "private": true,
-  "proxy": "http://whatsthecraic-alb-1707904777.eu-west-1.elb.amazonaws.com",
   "dependencies": {
     "@aws-amplify/auth": "^6.11.6",
     "@testing-library/dom": "^10.4.0",
