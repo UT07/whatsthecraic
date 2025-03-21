@@ -5,14 +5,19 @@ const axios = require('axios');
 
 const app = express();
 app.use(express.json());
-
+const router = express.Router();
 // Hardcoded or from env
 const PORT = process.env.PORT || 4000;
 const TICKETMASTER_API_KEY = process.env.TICKETMASTER_API_KEY || 'ACAYynxFJPKwG12GDFjqNdBqulANzQb8';
 
-const VENUE_SERVICE_URL    = 'http://localhost:4001';
-const DJ_SERVICE_URL       = 'http://localhost:4002';
-const LOCAL_EVENTS_URL     = 'http://localhost:4003';
+const VENUE_SERVICE_URL = process.env.VENUE_SERVICE_URL || 'http://venue-service.whatsthecraic.local:4001';
+const DJ_SERVICE_URL = process.env.DJ_SERVICE_URL || 'http://dj-service.whatsthecraic.local:4002';
+const LOCAL_EVENTS_URL = process.env.LOCAL_EVENTS_URL || 'http://events-service.whatsthecraic.local:4003';
+
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok' });
+  });
+  
 
 // GET /api/gigs => first see if TM yields any filtered events, else fallback to local
 app.get('/api/gigs', async (req, res) => {
@@ -113,10 +118,10 @@ app.get('/api/gigs', async (req, res) => {
     return res.json({ gigs: finalLocal, source: 'LocalDB' });
   } catch (err) {
     console.error('Aggregator fallback error:', err.message);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: err.message });
   }
 });
-
+app.use('/aggregator-service', router);
 app.listen(PORT, () => {
   console.log(`Fallback aggregator running on port ${PORT}`);
 });

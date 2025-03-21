@@ -27,6 +27,12 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+const router = express.Router();
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+
 // GET /venues => SELECT * FROM venues
 app.get('/venues', async (req, res) => {
   try {
@@ -147,6 +153,7 @@ app.delete('/venues/:id', async (req, res) => {
   }
 });
 
+app.use('/venue-service', router);
 // 4. Start the server
 const PORT = process.env.PORT || 4001;
 app.listen(PORT, () => {

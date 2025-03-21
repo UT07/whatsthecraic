@@ -25,6 +25,10 @@ const pool = mysql.createPool({
 const app = express();
 app.use(cors());
 app.use(express.json());
+const router = express.Router();
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
 /**
  * GET /events
@@ -181,7 +185,7 @@ app.delete('/events/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete local event' });
   }
 });
-
+app.use('/events-service', router);
 app.listen(API_PORT, () => {
   console.log(`Local Events Service running on port ${API_PORT}`);
 });

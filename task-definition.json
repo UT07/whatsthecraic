@@ -22,7 +22,10 @@
                 {"name": "DB_PORT", "value": "3306"},
                 {"name": "DB_USER", "value": "admin"},
                 {"name": "DB_PASSWORD", "value": "whatsthecraic123"},
-                {"name": "DB_NAME", "value": "gigsdb"}
+                {"name": "DB_NAME", "value": "gigsdb"},
+                {"name": "VENUE_SERVICE_URL", "value": "http://venue-service:4001"},
+                {"name": "DJ_SERVICE_URL", "value": "http://dj-service:4002"},
+                {"name": "LOCAL_EVENTS_URL", "value": "http://events-service:4003"}
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",

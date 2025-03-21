@@ -26,11 +26,17 @@ const pool = mysql.createPool({
 const app = express();
 app.use(express.json());
 app.use(cors());
+const router = express.Router();
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok' });
+  });
+  
 
 /**
  * GET /djs
  * Fetch all DJs
  */
+
 app.get('/djs', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM djs');
@@ -40,6 +46,7 @@ app.get('/djs', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch DJs' });
   }
 });
+
 
 /**
  * GET /djs/:dj_id
@@ -201,7 +208,7 @@ app.delete('/djs/:dj_id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete DJ' });
   }
 });
-
+app.use('/dj-service', router);
 app.listen(API_PORT, () => {
   console.log(`DJ Service running on port ${API_PORT}`);
 });
