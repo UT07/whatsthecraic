@@ -5,17 +5,36 @@ import aggregatorAPI from '../services/aggregatorAPI';
 import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 
+// Helper: Convert local event fields to a unified structure
+function unifyLocalEvents(localData = []) {
+  return localData.map(evt => ({
+    // Transform local properties to aggregator-like fields
+    eventName: evt.event_name || evt.eventName,
+    venue: evt.venue_name || evt.venue,
+    date: evt.date_local || evt.date,
+    time: evt.time_local || evt.time,
+    address: evt.address || 'N/A',
+    // For local events, ticketLink might be missing.
+    // If missing, ticketLink will be null.
+    ticketLink: evt.ticket_link || evt.ticketLink || null,
+    source: evt.source || 'Local',
+    id: evt.id,
+  }));
+}
+
 const CombinedGigs = () => {
-  const [defaultEvents, setDefaultEvents] = useState([]);
+  const [events, setEvents] = useState([]);
   const [searchResults, setSearchResults] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
+
+  // Filters are used only for aggregator searches
   const [filters, setFilters] = useState({
     city: '',
     genre: '',
     djName: '',
-    venueName: ''
+    venue: ''
   });
 
   const { register, handleSubmit, reset } = useForm();
@@ -23,8 +42,10 @@ const CombinedGigs = () => {
   const fetchEvents = () => {
     eventsAPI.getAllEvents()
       .then((data) => {
-        console.log("Default events fetched:", data);
-        setDefaultEvents(data);
+        console.log("Fetched events (raw):", data);
+        const unifiedLocal = unifyLocalEvents(data);
+        console.log("Unified local events:", unifiedLocal);
+        setEvents(unifiedLocal);
         setLoading(false);
       })
       .catch((error) => {
@@ -39,7 +60,7 @@ const CombinedGigs = () => {
 
   const openModal = (event = null) => {
     setEditingEvent(event);
-    reset(event || {}); // Pre-fill form if editing
+    reset(event || {});
     setModalOpen(true);
   };
 
@@ -95,22 +116,18 @@ const CombinedGigs = () => {
     setLoading(true);
     aggregatorAPI.searchEvents(filters)
       .then((responseData) => {
-        console.log("Search returned:", responseData);
+        console.log("Search results (raw):", responseData);
         let results = [];
-
-        // Convert responseData into a flat array if needed
         if (Array.isArray(responseData)) {
           results = responseData;
         } else if (responseData && Array.isArray(responseData.data)) {
           results = responseData.data;
         } else if (responseData && typeof responseData === 'object') {
-          // Convert the object's values into a single flat array
           results = Object.values(responseData).flat();
         } else {
           console.error("Unexpected search response structure:", responseData);
         }
-
-        console.log("Unwrapped search results:", results);
+        console.log("Aggregator results:", results);
         setSearchResults(results);
         setLoading(false);
       })
@@ -120,8 +137,8 @@ const CombinedGigs = () => {
       });
   };
 
-  // Determine which events to display:
-  const eventsToDisplay = searchResults !== null ? searchResults : defaultEvents;
+  // Display aggregator results if available; otherwise show local events
+  const eventsToDisplay = searchResults !== null ? searchResults : events;
 
   return (
     <div>
@@ -130,7 +147,6 @@ const CombinedGigs = () => {
         <div className="grid grid-cols-2 gap-4 mb-4">
           <input
             type="text"
-            name="city"
             placeholder="City"
             className="p-2 rounded bg-gray-800"
             value={filters.city}
@@ -138,7 +154,6 @@ const CombinedGigs = () => {
           />
           <input
             type="text"
-            name="genre"
             placeholder="Genre"
             className="p-2 rounded bg-gray-800"
             value={filters.genre}
@@ -146,7 +161,6 @@ const CombinedGigs = () => {
           />
           <input
             type="text"
-            name="djName"
             placeholder="DJ Name"
             className="p-2 rounded bg-gray-800"
             value={filters.djName}
@@ -154,11 +168,10 @@ const CombinedGigs = () => {
           />
           <input
             type="text"
-            name="venueName"
             placeholder="Venue Name"
             className="p-2 rounded bg-gray-800"
-            value={filters.venueName}
-            onChange={(e) => setFilters({ ...filters, venueName: e.target.value })}
+            value={filters.venue}
+            onChange={(e) => setFilters({ ...filters, venue: e.target.value })}
           />
         </div>
         <div className="flex space-x-4 mb-4">
@@ -177,7 +190,7 @@ const CombinedGigs = () => {
         </div>
         {searchResults !== null && (
           <p className="text-yellow-300 mb-2">
-            Showing search results ({eventsToDisplay.length} found). Clear filters to see default events.
+            Showing search results ({eventsToDisplay.length} found).
           </p>
         )}
       </div>
@@ -190,24 +203,19 @@ const CombinedGigs = () => {
             <p className="text-red-400">No events found.</p>
           ) : (
             eventsToDisplay.map((event, index) => {
-              console.log("Event item:", event); // Log each event to see the actual properties
+              // For local events (source "Local"), we show the button always;
+              // For others, we show it only if event.ticketLink exists.
+              const showTicketButton = event.source === "Local" || event.ticketLink;
+              // Set card background: Local events get gray, others neon green.
+              const cardClasses = `p-4 rounded flex flex-col transform transition-all duration-300 hover:scale-105 ${
+                event.source === "Local" ? "bg-gray-800" : "bg-[#39FF14]"
+              }`;
               return (
-                <motion.div
-                  key={event.id || index}
-                  className="bg-gray-800 p-4 rounded flex flex-col transform transition-all duration-300 hover:scale-105"
-                >
-                  {/* 
-                    Update the JSX to match the actual property names from the console log:
-                    eventName, date, time, venue, address, etc. 
-                  */}
+                <motion.div key={event.id || index} className={cardClasses}>
                   <h2 className="text-xl mb-2">{event.eventName}</h2>
                   <p><strong>Venue:</strong> {event.venue}</p>
                   <p><strong>Date:</strong> {event.date} {event.time}</p>
                   <p><strong>Address:</strong> {event.address}</p>
-                  {/* If you have city or genre in the object, show them similarly:
-                      <p><strong>City:</strong> {event.city}</p>
-                      <p><strong>Genre:</strong> {event.genre}</p> 
-                  */}
                   <div className="flex space-x-2 mt-2">
                     <button 
                       onClick={() => openModal(event)}
@@ -221,6 +229,18 @@ const CombinedGigs = () => {
                     >
                       Delete
                     </button>
+                    {showTicketButton && (
+                      <a
+                        href={event.ticketLink ? event.ticketLink : "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`bg-purple-500 px-3 py-1 rounded ${
+                          event.ticketLink ? "hover:bg-purple-600" : "opacity-50 cursor-not-allowed"
+                        }`}
+                      >
+                        Buy Tickets
+                      </a>
+                    )}
                   </div>
                 </motion.div>
               );
@@ -235,42 +255,44 @@ const CombinedGigs = () => {
           <div className="bg-gray-900 p-6 rounded w-11/12 max-w-md relative">
             <h2 className="text-2xl mb-4">{editingEvent ? 'Edit Event' : 'Add Event'}</h2>
             <form onSubmit={handleSubmit(onSubmit)}>
-              <div className="mb-4">
-                <label className="block mb-1">Event Name</label>
-                <input type="text" {...register("eventName", { required: true })} className="w-full p-2 rounded bg-gray-800" />
-              </div>
-              <div className="mb-4">
-                <label className="block mb-1">Date</label>
-                <input type="date" {...register("date")} className="w-full p-2 rounded bg-gray-800" />
-              </div>
-              <div className="mb-4">
-                <label className="block mb-1">Time</label>
-                <input type="time" {...register("time")} className="w-full p-2 rounded bg-gray-800" />
-              </div>
-              <div className="mb-4">
-                <label className="block mb-1">Venue</label>
-                <input type="text" {...register("venue", { required: true })} className="w-full p-2 rounded bg-gray-800" />
-              </div>
-              <div className="mb-4">
-                <label className="block mb-1">Address</label>
-                <input type="text" {...register("address")} className="w-full p-2 rounded bg-gray-800" />
-              </div>
-              {/* 
-                If you also want city, genre, or other fields, add them here to match your actual data. 
-                For example:
-                <div className="mb-4">
-                  <label className="block mb-1">City</label>
-                  <input type="text" {...register("city")} className="w-full p-2 rounded bg-gray-800" />
-                </div>
-              */}
-              <div className="flex justify-end space-x-2">
-                <button type="button" onClick={closeModal} className="bg-gray-500 px-4 py-2 rounded hover:bg-gray-600">
-                  Cancel
-                </button>
-                <button type="submit" className="bg-green-500 px-4 py-2 rounded hover:bg-green-600">
-                  {editingEvent ? 'Update' : 'Add'}
-                </button>
-              </div>
+              <input 
+                type="text" 
+                {...register("eventName", { required: true })} 
+                placeholder="Event Name" 
+                className="w-full p-2 mb-2 rounded bg-gray-800" 
+              />
+              <input 
+                type="date" 
+                {...register("date")} 
+                className="w-full p-2 mb-2 rounded bg-gray-800" 
+              />
+              <input 
+                type="time" 
+                {...register("time")} 
+                className="w-full p-2 mb-2 rounded bg-gray-800" 
+              />
+              <input 
+                type="text" 
+                {...register("venue")} 
+                placeholder="Venue Name" 
+                className="w-full p-2 mb-2 rounded bg-gray-800" 
+              />
+              <input 
+                type="text" 
+                {...register("address")} 
+                placeholder="Address" 
+                className="w-full p-2 mb-2 rounded bg-gray-800" 
+              />
+              {/* Field for ticket link */}
+              <input 
+                type="text" 
+                {...register("ticketLink")} 
+                placeholder="Ticket Link (optional)" 
+                className="w-full p-2 mb-2 rounded bg-gray-800" 
+              />
+              <button type="submit" className="bg-green-500 px-4 py-2 rounded hover:bg-green-600">
+                {editingEvent ? 'Update' : 'Add'}
+              </button>
             </form>
           </div>
         </div>

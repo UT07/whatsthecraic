@@ -24,7 +24,7 @@ const commonOptions = {
 };
 
 // Helper: Compute events by city for Doughnut chart
-const computeEventsByCity = (events) => {
+const computeEventsByCity = (events = []) => {
   const cityCount = {};
   events.forEach(event => {
     if (event.city) {
@@ -52,7 +52,7 @@ const computeEventsByCity = (events) => {
 };
 
 // Helper: Compute top DJs by fee for Bar chart
-const computeTopDJsByFee = (djs) => {
+const computeTopDJsByFee = (djs = []) => {
   const sorted = djs
     .filter(dj => dj.numeric_fee !== null && dj.numeric_fee !== undefined)
     .sort((a, b) => parseFloat(b.numeric_fee) - parseFloat(a.numeric_fee))
@@ -73,7 +73,7 @@ const computeTopDJsByFee = (djs) => {
 };
 
 // Helper: Compute DJ genre distribution for Scatter Plot
-const computeDJGenresForScatter = (djs) => {
+const computeDJGenresForScatter = (djs = []) => {
   const genreCount = {};
   djs.forEach(dj => {
     if (dj.genres) {
@@ -98,12 +98,13 @@ const computeDJGenresForScatter = (djs) => {
   };
 };
 
-// Helper: Compute event count per venue (using both events and aggregator events)
-// We merge events from both sources then use venueAPI data to list venues.
-const computeEventCountByVenue = (events, aggregatorEvents, venues) => {
+// Helper: Compute event count per venue
+const computeEventCountByVenue = (events = [], aggregatorEvents, venues = []) => {
+  // Ensure aggregatorEvents is an array; if not, default to an empty array.
+  const aggregatorArr = Array.isArray(aggregatorEvents) ? aggregatorEvents : [];
   // Merge events from eventsAPI and aggregatorAPI
-  const allEvents = [...events, ...aggregatorEvents];
-  // Create an object that counts events per venue (case-insensitive)
+  const allEvents = [...events, ...aggregatorArr];
+  // Count events per venue (using case-insensitive keys)
   const venueEventCount = {};
   allEvents.forEach(event => {
     if (event.venue_name) {
