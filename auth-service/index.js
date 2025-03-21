@@ -1,4 +1,3 @@
-// aggregator-service/src/index.js
 require('dotenv').config({ path: '../.env' });
 const express = require('express');
 const axios = require('axios');
@@ -30,7 +29,11 @@ const calculatePopularityScore = (gig, venues, djs) => {
   });
 
   return score;
-};
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
 app.get('/aggregator-service/api/gigs', async (req, res) => {
   try {
@@ -45,7 +48,7 @@ app.get('/aggregator-service/api/gigs', async (req, res) => {
     const city = req.query.city || 'Dublin';
     const genre = req.query.genre || 'Electronic';
 
-    // Fetch Ticketmaster events
+    // Ticketmaster events
     const tmUrl = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TICKETMASTER_API_KEY}&city=${city}&classificationName=${genre}`;
     const tmRes = await axios.get(tmUrl);
     const tmEvents = tmRes.data._embedded?.events || [];
@@ -76,22 +79,31 @@ app.get('/aggregator-service/api/gigs', async (req, res) => {
       address: venues.find(v => ev.venue_name.includes(v.name))?.address || 'N/A',
       djs: djs.filter(dj => ev.event_name.includes(dj.dj_name)).map(d => d.dj_name),
       ticketLink: ev.url,
-      isLocal: true
-    });
+      isLocal: true,
+      popularityScore: calculatePopularityScore(ev, venues, djs)
+    }));
 
-    let combinedEvents = [
-      ...formattedTMEvents.map(event => ({...event, source: 'Ticketmaster', popularityScore: calculatePopularityScore(event, venues, djs)})),
-      ...formattedLocalEvents.map(ev => ({...ev, isLocal: true, popularityScore: calculatePopularityScore(ev, venues, djs)}))
+    const combinedEvents = [
+      ...formattedTMEvents.map(event => ({ ...event, source: 'Ticketmaster' })),
+      ...formattedLocalEvents
     ];
 
-    combinedEvents.sort((a,b) => b.popularityScore - a.popularityScore);
+    combinedEvents.sort((a, b) => b.popularityScore - a.popularityScore);
 
     return res.json({ gigs: combinedEvents });
 
-}catch (err) {
-    console.error('Aggregator fallback error:', err.message);
-    res.status(500).json({ error: err.message });
-}
-);
+  } catch (error) {
+    console.error('Error fetching gigs:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
 
-app.listen(PORT, () => console.log(`Aggregator running on port ${PORT}`));
+// Health check
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// Start the server at the very end
+app.listen(PORT, () => {
+  console.log(`Aggregator running on port ${PORT}`);
+});

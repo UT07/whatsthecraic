@@ -64,11 +64,10 @@ services:
       DB_USER: "${DB_USER}"
       DB_PASSWORD: "${DB_PASSWORD}"
       DB_NAME: "${DB_NAME}"
-
-      # URLs for microservices
-      VENUE_SERVICE_URL: "http://venue-service:4001"
-      DJ_SERVICE_URL: "http://dj-service:4002"
-      LOCAL_EVENTS_URL: "http://local-events:4003"
+      
+      VENUE_SERVICE_URL: "http://venue-service.whatsthecraic.local:4001"
+      DJ_SERVICE_URL: "http://dj-service.whatsthecraic.local:4002"
+      LOCAL_EVENTS_URL: "http://events-service.whatsthecraic.local:4003"
 
       # Ticketmaster Key
       TICKETMASTER_API_KEY: "${TICKETMASTER_API_KEY}"
