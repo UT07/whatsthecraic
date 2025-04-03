@@ -1,12 +1,10 @@
 version: 1
 frontend:
   phases:
-    preBuild:
+    build:
       commands:
         - cd gigfinder-app
         - npm install --force
-    build:
-      commands:
         - npm run build
   artifacts:
     baseDirectory: gigfinder-app/build

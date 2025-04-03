@@ -2,7 +2,7 @@ require('dotenv').config({ path: '../.env' });
 
 const express = require('express');
 const mysql = require('mysql2/promise');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const app = express();
@@ -103,6 +103,9 @@ app.post('/auth/login', async (req, res) => {
 // A simple health check endpoint
 app.get('/', (req, res) => {
   res.send('Authentication API is running');
+});
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
 });
 
 // Start the server

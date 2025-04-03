@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE = process.env.REACT_APP_API_BASE || 'http://whatsthecraic-alb-1707904777.eu-west-1.elb.amazonaws.com';
+const API_BASE = process.env.REACT_APP_API_BASE || 'https://ec2-18-201-228-48.eu-west-1.compute.amazonaws.com';
 
 const djAPI = {
   // Get all DJs
