@@ -1,4 +1,3 @@
-// src/pages/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { Doughnut, Bar, Scatter, Bubble } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
@@ -178,22 +177,22 @@ const Dashboard = () => {
   return (
     <div className="grid gap-6">
       {/* Doughnut Chart for Events by City */}
-      <div className="bg-gray-800 p-4 rounded">
+      <div className="bg-gray-800 p-4 rounded h-80">
         <h2 className="text-2xl mb-2">Events by City</h2>
         <Doughnut data={graphs.cityData} options={commonOptions} />
       </div>
       {/* Bar Chart for Top DJs by Fee */}
-      <div className="bg-gray-800 p-4 rounded">
+      <div className="bg-gray-800 p-4 rounded h-80">
         <h2 className="text-2xl mb-2">Top DJs by Fee</h2>
         <Bar data={graphs.topDJsData} options={commonOptions} />
       </div>
       {/* Bar Chart for Event Count by Venue */}
-      <div className="bg-gray-800 p-4 rounded">
+      <div className="bg-gray-800 p-4 rounded h-80">
         <h2 className="text-2xl mb-2">Event Count by Venue</h2>
         <Bar data={venueChartData} options={commonOptions} />
       </div>
       {/* Scatter Plot for DJ Genre Distribution */}
-      <div className="bg-gray-800 p-4 rounded">
+      <div className="bg-gray-800 p-4 rounded h-80">
         <h2 className="text-2xl mb-2">DJ Genre Distribution (Scatter Plot)</h2>
         <Scatter 
           data={scatterData} 

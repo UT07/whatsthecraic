@@ -15,6 +15,7 @@ const Navbar = ({ setIsAuthenticated }) => {
   return (
     <nav className="bg-gray-900 p-4 flex justify-between items-center">
       <div className="flex space-x-4">
+        <span className="text-green-400 font-bold text-xl mr-6">WhatstheCraic</span>
         {isAuthenticated && (
           <>
             <Link to="/dashboard" className="hover:text-green-300">Dashboard</Link>
