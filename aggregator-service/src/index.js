@@ -13,7 +13,7 @@ app.use(cors({
 
 
 const PORT = process.env.PORT || 4000;
-const TICKETMASTER_API_KEY = process.env.TICKETMASTER_API_KEY || 'ACAYynxFJPKwG12GDFjqNdBqulANzQb8';
+const TICKETMASTER_API_KEY = process.env.TICKETMASTER_API_KEY || 'OvTzrsAoD4gpLHZjvEON2Fsgnv3FhWGG';
 const VENUE_SERVICE_URL = process.env.VENUE_SERVICE_URL || 'http://venue-service.whatsthecraic.local:4001';
 const DJ_SERVICE_URL = process.env.DJ_SERVICE_URL || 'http://dj-service.whatsthecraic.local:4002';
 const LOCAL_EVENTS_URL = process.env.LOCAL_EVENTS_URL || 'http://events-service.whatsthecraic.local:4003';
