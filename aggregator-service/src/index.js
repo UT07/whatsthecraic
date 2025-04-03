@@ -1,8 +1,16 @@
 const express = require('express');
 const axios = require('axios');
+const cors = require('cors');
 
 const app = express();
 app.use(express.json());
+
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true
+}));
+
 
 const PORT = process.env.PORT || 4000;
 const TICKETMASTER_API_KEY = process.env.TICKETMASTER_API_KEY || 'ACAYynxFJPKwG12GDFjqNdBqulANzQb8';
