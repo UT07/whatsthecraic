@@ -179,66 +179,70 @@ const Dashboard = () => {
   };
 
   return (
-    <div className={`grid gap-6 ${viewMode === 'list' ? 'grid-cols-1' : 'grid-cols-2'}`}>
-      <button onClick={toggleViewMode} className="mb-4 p-2 bg-blue-500 text-white rounded">
-        Toggle to {viewMode === 'grid' ? 'List' : 'Grid'} View
-      </button>
-      {/* Doughnut Chart for Events by City */}
-      <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 0 ? 'h-screen' : 'h-80'} transition-all`}>
-        <h2 className="text-2xl mb-2">Events by City</h2>
-        <button onClick={() => toggleFullscreen(0)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
-          {fullscreenIndex === 0 ? 'Exit Fullscreen' : 'Fullscreen'}
+    <div>
+      <div className="flex justify-end mb-4">
+        <button onClick={toggleViewMode} className="px-3 py-1 text-sm text-blue-200 bg-blue-800 hover:bg-blue-700 rounded transition">
+          Toggle to {viewMode === 'grid' ? 'List' : 'Grid'} View
         </button>
-        <Doughnut data={graphs.cityData} options={commonOptions} />
       </div>
-      {/* Bar Chart for Top DJs by Fee */}
-      <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 1 ? 'h-screen' : 'h-80'} transition-all`}>
-        <h2 className="text-2xl mb-2">Top DJs by Fee</h2>
-        <button onClick={() => toggleFullscreen(1)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
-          {fullscreenIndex === 1 ? 'Exit Fullscreen' : 'Fullscreen'}
-        </button>
-        <Bar data={graphs.topDJsData} options={commonOptions} />
-      </div>
-      {/* Bar Chart for Event Count by Venue */}
-      <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 2 ? 'h-screen' : 'h-80'} transition-all`}>
-        <h2 className="text-2xl mb-2">Event Count by Venue</h2>
-        <button onClick={() => toggleFullscreen(2)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
-          {fullscreenIndex === 2 ? 'Exit Fullscreen' : 'Fullscreen'}
-        </button>
-        <Bar data={venueChartData} options={commonOptions} />
-      </div>
-      {/* Scatter Plot for DJ Genre Distribution */}
-      <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 3 ? 'h-screen' : 'h-80'} transition-all`}>
-        <h2 className="text-2xl mb-2">DJ Genre Distribution (Scatter Plot)</h2>
-        <button onClick={() => toggleFullscreen(3)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
-          {fullscreenIndex === 3 ? 'Exit Fullscreen' : 'Fullscreen'}
-        </button>
-        <Scatter 
-          data={scatterData} 
-          options={{
-            ...commonOptions,
-            scales: {
-              x: {
-                type: 'category',
-                labels: scatterData.datasets[0].data.map(point => point.x),
-                title: {
-                  display: true,
-                  text: 'Genre',
-                  font: { size: 18 },
+      <div className={`grid gap-6 ${viewMode === 'list' ? 'grid-cols-1' : 'grid-cols-2'}`}>
+        {/* Doughnut Chart for Events by City */}
+        <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 0 ? 'h-screen' : 'h-[42rem]'} transition-all`}>
+          <h2 className="text-2xl mb-2">Events by City</h2>
+          <button onClick={() => toggleFullscreen(0)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
+            {fullscreenIndex === 0 ? 'Exit Fullscreen' : 'Fullscreen'}
+          </button>
+          <Doughnut data={graphs.cityData} options={commonOptions} />
+        </div>
+        {/* Bar Chart for Top DJs by Fee */}
+        <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 1 ? 'h-screen' : 'h-[42rem]'} transition-all`}>
+          <h2 className="text-2xl mb-2">Top DJs by Fee</h2>
+          <button onClick={() => toggleFullscreen(1)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
+            {fullscreenIndex === 1 ? 'Exit Fullscreen' : 'Fullscreen'}
+          </button>
+          <Bar data={graphs.topDJsData} options={commonOptions} />
+        </div>
+        {/* Bar Chart for Event Count by Venue */}
+        <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 2 ? 'h-screen' : 'h-[42rem]'} transition-all`}>
+          <h2 className="text-2xl mb-2">Event Count by Venue</h2>
+          <button onClick={() => toggleFullscreen(2)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
+            {fullscreenIndex === 2 ? 'Exit Fullscreen' : 'Fullscreen'}
+          </button>
+          <Bar data={venueChartData} options={commonOptions} />
+        </div>
+        {/* Scatter Plot for DJ Genre Distribution */}
+        <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 3 ? 'h-screen' : 'h-[42rem]'} transition-all`}>
+          <h2 className="text-2xl mb-2">DJ Genre Distribution (Scatter Plot)</h2>
+          <button onClick={() => toggleFullscreen(3)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
+            {fullscreenIndex === 3 ? 'Exit Fullscreen' : 'Fullscreen'}
+          </button>
+          <Scatter 
+            data={scatterData} 
+            options={{
+              ...commonOptions,
+              scales: {
+                x: {
+                  type: 'category',
+                  labels: scatterData.datasets[0].data.map(point => point.x),
+                  title: {
+                    display: true,
+                    text: 'Genre',
+                    font: { size: 18 },
+                  },
+                  ticks: { font: { size: 16 } }
                 },
-                ticks: { font: { size: 16 } }
-              },
-              y: {
-                title: {
-                  display: true,
-                  text: 'Frequency',
-                  font: { size: 18 },
-                },
-                ticks: { font: { size: 16 } }
+                y: {
+                  title: {
+                    display: true,
+                    text: 'Frequency',
+                    font: { size: 18 },
+                  },
+                  ticks: { font: { size: 16 } }
+                }
               }
-            }
-          }} 
-        />
+            }} 
+          />
+        </div>
       </div>
     </div>
   );
