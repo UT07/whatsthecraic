@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Doughnut, Bar, Scatter, Bubble } from 'react-chartjs-2';
+import { Doughnut, Bar, Scatter } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
 import eventsAPI from '../services/eventsAPI';
 import djAPI from '../services/djAPI';
@@ -99,11 +99,8 @@ const computeDJGenresForScatter = (djs = []) => {
 
 // Helper: Compute event count per venue
 const computeEventCountByVenue = (events = [], aggregatorEvents, venues = []) => {
-  // Ensure aggregatorEvents is an array; if not, default to an empty array.
   const aggregatorArr = Array.isArray(aggregatorEvents) ? aggregatorEvents : [];
-  // Merge events from eventsAPI and aggregatorAPI
   const allEvents = [...events, ...aggregatorArr];
-  // Count events per venue (using case-insensitive keys)
   const venueEventCount = {};
   allEvents.forEach(event => {
     if (event.venue_name) {
@@ -111,13 +108,11 @@ const computeEventCountByVenue = (events = [], aggregatorEvents, venues = []) =>
       venueEventCount[venueName] = (venueEventCount[venueName] || 0) + 1;
     }
   });
-  // For each venue from venueAPI, get the count (default 0 if none)
   const labels = venues.map(venue => venue.name);
   const data = labels.map(label => {
     const key = label.trim().toLowerCase();
     return venueEventCount[key] || 0;
   });
-  // Use a palette for bars
   const palette = [
     'rgba(255, 99, 132, 0.8)',
     'rgba(54, 162, 235, 0.8)',
@@ -137,6 +132,8 @@ const Dashboard = () => {
   const [scatterData, setScatterData] = useState(null);
   const [venueData, setVenueData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState('grid');
+  const [fullscreenIndex, setFullscreenIndex] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -161,10 +158,17 @@ const Dashboard = () => {
       });
   }, []);
 
+  const toggleViewMode = () => {
+    setViewMode(prev => (prev === 'grid' ? 'list' : 'grid'));
+  };
+
+  const toggleFullscreen = (index) => {
+    setFullscreenIndex(prev => (prev === index ? null : index));
+  };
+
   if (loading) return <p className="text-green-400">Loading Dashboard...</p>;
   if (!graphs || !scatterData || !venueData) return <p className="text-green-400">No data available</p>;
 
-  // Build dataset for Venue Event Count chart (Bar chart)
   const venueChartData = {
     labels: venueData.labels,
     datasets: [{
@@ -175,25 +179,40 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="grid gap-6">
+    <div className={`grid gap-6 ${viewMode === 'list' ? 'grid-cols-1' : 'grid-cols-2'}`}>
+      <button onClick={toggleViewMode} className="mb-4 p-2 bg-blue-500 text-white rounded">
+        Toggle to {viewMode === 'grid' ? 'List' : 'Grid'} View
+      </button>
       {/* Doughnut Chart for Events by City */}
-      <div className="bg-gray-800 p-4 rounded h-80">
+      <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 0 ? 'h-screen' : 'h-80'} transition-all`}>
         <h2 className="text-2xl mb-2">Events by City</h2>
+        <button onClick={() => toggleFullscreen(0)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
+          {fullscreenIndex === 0 ? 'Exit Fullscreen' : 'Fullscreen'}
+        </button>
         <Doughnut data={graphs.cityData} options={commonOptions} />
       </div>
       {/* Bar Chart for Top DJs by Fee */}
-      <div className="bg-gray-800 p-4 rounded h-80">
+      <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 1 ? 'h-screen' : 'h-80'} transition-all`}>
         <h2 className="text-2xl mb-2">Top DJs by Fee</h2>
+        <button onClick={() => toggleFullscreen(1)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
+          {fullscreenIndex === 1 ? 'Exit Fullscreen' : 'Fullscreen'}
+        </button>
         <Bar data={graphs.topDJsData} options={commonOptions} />
       </div>
       {/* Bar Chart for Event Count by Venue */}
-      <div className="bg-gray-800 p-4 rounded h-80">
+      <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 2 ? 'h-screen' : 'h-80'} transition-all`}>
         <h2 className="text-2xl mb-2">Event Count by Venue</h2>
+        <button onClick={() => toggleFullscreen(2)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
+          {fullscreenIndex === 2 ? 'Exit Fullscreen' : 'Fullscreen'}
+        </button>
         <Bar data={venueChartData} options={commonOptions} />
       </div>
       {/* Scatter Plot for DJ Genre Distribution */}
-      <div className="bg-gray-800 p-4 rounded h-80">
+      <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 3 ? 'h-screen' : 'h-80'} transition-all`}>
         <h2 className="text-2xl mb-2">DJ Genre Distribution (Scatter Plot)</h2>
+        <button onClick={() => toggleFullscreen(3)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
+          {fullscreenIndex === 3 ? 'Exit Fullscreen' : 'Fullscreen'}
+        </button>
         <Scatter 
           data={scatterData} 
           options={{
