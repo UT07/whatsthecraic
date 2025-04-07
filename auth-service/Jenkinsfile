@@ -23,9 +23,9 @@ pipeline {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
                     sh """
-                        docker tag whatsthecraic/${SERVICE_NAME}:${IMAGE_TAG} ${ECR_URI}/whatsthecraic/${SERVICE_NAME}:${IMAGE_TAG}
+                        docker tag ${SERVICE_NAME}:${IMAGE_TAG} ${ECR_URI}/${SERVICE_NAME}:${IMAGE_TAG}
                         aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URI}
-                        docker push ${ECR_URI}/whatsthecraic/${SERVICE_NAME}:${IMAGE_TAG}
+                        docker push ${ECR_URI}/${SERVICE_NAME}:${IMAGE_TAG}
                     """
                 }
             }
