@@ -1,0 +1,41 @@
+{
+    "family": "aggregator-task",
+    "executionRoleArn": "arn:aws:iam::395338916491:role/ecsTaskExecutionRole",
+    "taskRoleArn": "arn:aws:iam::395338916491:role/ecsTaskExecutionRole",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "512",
+    "memory": "1024",
+    "containerDefinitions": [
+        {
+            "name": "aggregator-service",
+            "image": "395338916491.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/aggregator-service:latest",
+            "portMappings": [
+                {
+                    "containerPort": 4000,
+                    "hostPort": 4000,
+                    "protocol": "tcp"
+                }
+            ],
+            "essential": true,
+            "environment": [
+                {"name": "DB_HOST", "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"},
+                {"name": "DB_PORT", "value": "3306"},
+                {"name": "DB_USER", "value": "admin"},
+                {"name": "DB_PASSWORD", "value": "whatsthecraic123"},
+                {"name": "DB_NAME", "value": "gigsdb"},
+                {"name": "VENUE_SERVICE_URL", "value": "http://venue-service.whatsthecraic.local:4001"},
+                {"name": "DJ_SERVICE_URL", "value": "http://dj-service.whatsthecraic.local:4002"},
+                {"name": "LOCAL_EVENTS_URL", "value": "http://events-service.whatsthecraic.local:4003"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/whatsthecraic-aggregator",
+                    "awslogs-region": "eu-west-1",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            }
+        }
+    ]
+}
