@@ -15,7 +15,7 @@ pipeline {
         stage('Build') {
             steps {
                 dir("${SERVICE_NAME}") {
-                    sh "docker build -t whatsthecraic/${SERVICE_NAME} ."
+                     sh "docker build -t ${SERVICE_NAME}:${IMAGE_TAG} ."
                 }
             }
         }
