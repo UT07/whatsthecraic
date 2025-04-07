@@ -11,11 +11,7 @@ pipeline {
         TASK_DEF_NAME = 'venue-task'
     }
     stages {
-        stage('Checkout') {
-            steps {
-                git url: 'https://github.com/UT07/whatsthecraic.git', branch: 'main'
-            }
-        }
+
         stage('Build') {
             steps {
                 dir("${SERVICE_NAME}") {
@@ -25,19 +21,27 @@ pipeline {
         }
         stage('Push to ECR') {
             steps {
-                sh "docker tag whatsthecraic/${SERVICE_NAME}:${IMAGE_TAG} ${ECR_URI}/whatsthecraic/${SERVICE_NAME}:${IMAGE_TAG}"
-                sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URI}"
-                sh "docker push ${ECR_URI}/whatsthecraic/${SERVICE_NAME}:${IMAGE_TAG}"
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
+                    sh """
+                        docker tag whatsthecraic/${SERVICE_NAME}:${IMAGE_TAG} ${ECR_URI}/whatsthecraic/${SERVICE_NAME}:${IMAGE_TAG}
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URI}
+                        docker push ${ECR_URI}/whatsthecraic/${SERVICE_NAME}:${IMAGE_TAG}
+                    """
+                }
             }
         }
-        stage('Register Task Definition') {
+        stage('Register Task Def') {
             steps {
-                sh "aws ecs register-task-definition --cli-input-json file://${TASK_DEF_FILE} --region ${AWS_REGION}"
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
+                    sh "aws ecs register-task-definition --cli-input-json file://${TASK_DEF_FILE} --region ${AWS_REGION}"
+                }
             }
         }
         stage('Update ECS Service') {
             steps {
-                sh "aws ecs update-service --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --task-definition ${TASK_DEF_NAME} --region ${AWS_REGION}"
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
+                    sh "aws ecs update-service --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --task-definition ${TASK_DEF_NAME} --region ${AWS_REGION}"
+                }
             }
         }
     }
