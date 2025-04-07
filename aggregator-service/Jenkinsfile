@@ -11,11 +11,7 @@ pipeline {
         TASK_DEF_NAME = 'aggregator-task'
     }
     stages {
-        stage('Checkout') {
-            steps {
-                git url: 'https://github.com/UT07/whatsthecraic.git', branch: 'main'
-            }
-        }
+
         stage('Build') {
             steps {
                 dir("${SERVICE_NAME}") {
