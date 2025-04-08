@@ -31,7 +31,7 @@ app.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok' });
   });
   
-
+const CONVERTER_API = 'https://5ss3rebhtf.execute-api.us-east-1.amazonaws.com/currencyConverter';
 /**
  * GET /djs
  * Fetch all DJs
@@ -208,6 +208,32 @@ app.delete('/djs/:dj_id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete DJ' });
   }
 });
+
+// GET /djs/:dj_id/fee-in-eur
+app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
+  const djId = parseInt(req.params.dj_id, 10);
+
+  try {
+    const [rows] = await pool.query('SELECT * FROM djs WHERE dj_id = ?', [djId]);
+    if (rows.length === 0) return res.status(404).json({ error: 'DJ not found' });
+
+    const dj = rows[0];
+    const response = await axios.post(CONVERTER_API, {
+      amount: dj.numeric_fee,
+      currency: dj.currency
+    });
+
+    res.json({
+      original_amount: dj.numeric_fee,
+      original_currency: dj.currency,
+      converted_amount_eur: response.data.converted_amount_eur
+    });
+  } catch (err) {
+    console.error('Error converting currency:', err);
+    res.status(500).json({ error: 'Currency conversion failed' });
+  }
+});
+
 app.use('/dj-service', router);
 app.listen(API_PORT, () => {
   console.log(`DJ Service running on port ${API_PORT}`);
