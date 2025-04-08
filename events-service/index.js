@@ -5,12 +5,12 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 
 // Adjust these env vars / defaults as needed
-const DB_HOST = process.env.DB_HOST || '127.0.0.1';
+const DB_HOST = process.env.DB_HOST || 'x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com';
 const DB_PORT = process.env.DB_PORT || '3306';
-const DB_USER = process.env.DB_USER || 'root';
-const DB_PASSWORD = process.env.DB_PASSWORD || 'UTav@2523';
+const DB_USER = process.env.DB_USER || 'admin';
+const DB_PASSWORD = process.env.DB_PASSWORD || 'whatsthecraic123';
 const DB_NAME = process.env.DB_NAME || 'gigsdb';
-const API_PORT = process.env.API_PORT || 4003;
+const API_PORT = process.env.API_PORT || 4002;
 
 const pool = mysql.createPool({
   host: DB_HOST,
