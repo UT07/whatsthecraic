@@ -3,7 +3,7 @@
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
-const axios = require('axios'); // Make sure this is at the top
+const axios = require('axios'); 
 // Load env vars or define defaults
 const DB_HOST = process.env.DB_HOST || '127.0.0.1';
 const DB_PORT = process.env.DB_PORT || '3306';
@@ -217,34 +217,34 @@ app.delete('/djs/:dj_id', async (req, res) => {
   }
 });
 
-// GET /djs/:dj_id/fee-in-eur
-app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
-  const djId = parseInt(req.params.dj_id, 10);
+// // GET /djs/:dj_id/fee-in-eur
+// app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
+//   const djId = parseInt(req.params.dj_id, 10);
 
-  try {
-    const [rows] = await pool.query('SELECT * FROM djs WHERE dj_id = ?', [djId]);
-    if (rows.length === 0) return res.status(404).json({ error: 'DJ not found' });
+//   try {
+//     const [rows] = await pool.query('SELECT * FROM djs WHERE dj_id = ?', [djId]);
+//     if (rows.length === 0) return res.status(404).json({ error: 'DJ not found' });
 
-    const dj = rows[0];
-    const response = await axios.post(CONVERTER_API, {
-      amount: dj.numeric_fee,
-      currency: dj.currency
-    }, {
-      headers: { 'Content-Type': 'application/json' }
-    });
+//     const dj = rows[0];
+//     const response = await axios.post(CONVERTER_API, {
+//       amount: dj.numeric_fee,
+//       currency: dj.currency
+//     }, {
+//       headers: { 'Content-Type': 'application/json' }
+//     });
 
-    const converted = response.data.converted_amount_eur;
+//     const converted = response.data.converted_amount_eur;
 
-    res.json({
-      original_amount: dj.numeric_fee,
-      original_currency: dj.currency,
-      converted_amount_eur: converted
-    });
-  } catch (err) {
-    console.error('Error converting currency:', err);
-    res.status(500).json({ error: 'Currency conversion failed' });
-  }
-});
+//     res.json({
+//       original_amount: dj.numeric_fee,
+//       original_currency: dj.currency,
+//       converted_amount_eur: converted
+//     });
+//   } catch (err) {
+//     console.error('Error converting currency:', err);
+//     res.status(500).json({ error: 'Currency conversion failed' });
+//   }
+// });
 
 app.use('/dj-service', router);
 app.listen(API_PORT, () => {
