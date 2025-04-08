@@ -17,19 +17,9 @@ const DJs = () => {
       .then(async (data) => {
         const enriched = await Promise.all(
           data.map(async (dj) => {
-            if (dj.currency === 'EUR') {
-              return { ...dj, converted_fee_eur: dj.numeric_fee };
-            }
-  
             try {
-              const res = await fetch('https://5ss3rebhtf.execute-api.us-east-1.amazonaws.com/currencyConverter', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount: dj.numeric_fee, currency: dj.currency })
-              });
-  
+              const res = await fetch(`https://ec2-18-201-228-48.eu-west-1.compute.amazonaws.com/djs/${dj.dj_id}/fee-in-eur`);
               const response = await res.json();
-  
               return {
                 ...dj,
                 converted_fee_eur: parseFloat(response.converted_amount_eur).toFixed(2)
@@ -40,7 +30,6 @@ const DJs = () => {
             }
           })
         );
-  
         setDjs(enriched);
         setLoading(false);
       })
