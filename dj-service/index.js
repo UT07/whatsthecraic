@@ -3,10 +3,10 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const axios = require('axios'); 
 // Load env vars or define defaults
-const DB_HOST = process.env.DB_HOST || '127.0.0.1';
+const DB_HOST = process.env.DB_HOST || 'x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com';
 const DB_PORT = process.env.DB_PORT || '3306';
-const DB_USER = process.env.DB_USER || 'root';
-const DB_PASSWORD = process.env.DB_PASSWORD || 'UTav@2523';
+const DB_USER = process.env.DB_USER || 'admin';
+const DB_PASSWORD = process.env.DB_PASSWORD || 'whatsthecraic123';
 const DB_NAME = process.env.DB_NAME || 'gigsdb';
 const API_PORT = process.env.API_PORT || 4002;
 
@@ -235,9 +235,17 @@ app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
 
     // Try currency conversion
     try {
-      const response = await axios.post(CONVERTER_API, {
+      console.log('Sending request to CONVERTER_API with payload:', {
         amount: dj.numeric_fee,
-        currency: dj.currency
+        currency: "USD"
+      });
+      const response = await axios.post(CONVERTER_API, {
+        amount: parseFloat(dj.numeric_fee),
+        currency: "USD"
+      },{
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
 
       const { original_amount, original_currency, exchange_rate, converted_amount_eur } = response.data;
@@ -245,14 +253,17 @@ app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
       return res.json({
         original_amount,
         original_currency,
-        exchange_rate,
         converted_amount_eur
       });
     } catch (conversionError) {
-      console.error(`Currency conversion failed: ${conversionError.message}`);
+      console.log('Sending request to CONVERTER_API with payload:', {
+        amount: dj.numeric_fee,
+        currency: dj.currency
+      });
       return res.status(502).json({
         error: 'Currency conversion failed',
-        details: 'The converter service may be down or does not support this currency.'
+        message: conversionError.message,
+        stack: conversionError.stack
       });
     }
 
