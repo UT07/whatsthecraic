@@ -14,23 +14,8 @@ const DJs = () => {
 
   const fetchDJs = () => {
     djAPI.getAllDJs()
-      .then(async (data) => {
-        const enriched = await Promise.all(
-          data.map(async (dj) => {
-            try {
-              const res = await fetch(`https://ec2-18-201-228-48.eu-west-1.compute.amazonaws.com/djs/${dj.dj_id}/fee-in-eur`);
-              const response = await res.json();
-              return {
-                ...dj,
-                converted_fee_eur: parseFloat(response.converted_amount_eur).toFixed(2)
-              };
-            } catch (err) {
-              console.warn(`Conversion failed for DJ ${dj.dj_name}:`, err);
-              return { ...dj, converted_fee_eur: null };
-            }
-          })
-        );
-        setDjs(enriched);
+      .then((data) => {
+        setDjs(data);
         setLoading(false);
       })
       .catch((error) => {
@@ -38,7 +23,6 @@ const DJs = () => {
         setLoading(false);
       });
   };
-  
 
   useEffect(() => {
     fetchDJs();
