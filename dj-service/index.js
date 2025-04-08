@@ -228,12 +228,16 @@ app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
     const response = await axios.post(CONVERTER_API, {
       amount: dj.numeric_fee,
       currency: dj.currency
+    }, {
+      headers: { 'Content-Type': 'application/json' }
     });
+
+    const converted = response.data.converted_amount_eur;
 
     res.json({
       original_amount: dj.numeric_fee,
       original_currency: dj.currency,
-      converted_amount_eur: response.data.converted_amount_eur
+      converted_amount_eur: converted
     });
   } catch (err) {
     console.error('Error converting currency:', err);
