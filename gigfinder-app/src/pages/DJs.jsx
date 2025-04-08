@@ -14,8 +14,34 @@ const DJs = () => {
 
   const fetchDJs = () => {
     djAPI.getAllDJs()
-      .then((data) => {
-        setDjs(data);
+      .then(async (data) => {
+        const enriched = await Promise.all(
+          data.map(async (dj) => {
+            if (dj.currency === 'EUR') {
+              return { ...dj, converted_fee_eur: dj.numeric_fee };
+            }
+  
+            try {
+              const res = await fetch('https://5ss3rebhtf.execute-api.us-east-1.amazonaws.com/currencyConverter', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount: dj.numeric_fee, currency: dj.currency })
+              });
+  
+              const response = await res.json();
+  
+              return {
+                ...dj,
+                converted_fee_eur: parseFloat(response.converted_amount_eur).toFixed(2)
+              };
+            } catch (err) {
+              console.warn(`Conversion failed for DJ ${dj.dj_name}:`, err);
+              return { ...dj, converted_fee_eur: null };
+            }
+          })
+        );
+  
+        setDjs(enriched);
         setLoading(false);
       })
       .catch((error) => {
@@ -23,6 +49,7 @@ const DJs = () => {
         setLoading(false);
       });
   };
+  
 
   useEffect(() => {
     fetchDJs();
@@ -110,7 +137,11 @@ const DJs = () => {
             <p><strong>City:</strong> {dj.city}</p>
             <p><strong>Phone:</strong> {dj.phone}</p>
             <p><strong>DJ Fee:</strong> {dj.dj_fee}</p>
+            <p><strong>Currency:</strong> {dj.currency}</p>
             <p><strong>Numeric Fee:</strong> {dj.numeric_fee}</p>
+            {dj.converted_fee_eur && (
+              <p><strong>Fee in EUR:</strong> €{dj.converted_fee_eur}</p>
+            )}
 
             <div className="flex space-x-2 mt-2">
               <button 
@@ -165,8 +196,14 @@ const DJs = () => {
                 <input type="text" {...register("phone")} className="w-full p-2 rounded bg-gray-800" />
               </div>
               <div className="mb-4">
-                <label className="block mb-1">DJ Fee</label>
-                <input type="text" {...register("dj_fee")} className="w-full p-2 rounded bg-gray-800" />
+                <label className="block mb-1">Currency</label>
+                <select {...register("currency")} className="w-full p-2 rounded bg-gray-800">
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="INR">INR</option>
+                  <option value="GBP">GBP</option>
+                  <option value="CNY">CNY</option>
+                </select>
               </div>
               <div className="mb-4">
                 <label className="block mb-1">Numeric Fee</label>
