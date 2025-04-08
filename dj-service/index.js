@@ -80,7 +80,8 @@ app.post('/djs', async (req, res) => {
     soundcloud,
     city,
     phone,
-    numeric_fee
+    numeric_fee,
+    currency
   } = req.body;
 
   // 'dj_name' is required
@@ -90,12 +91,13 @@ app.post('/djs', async (req, res) => {
 
   // Convert numeric_fee to float or default to 0
   const feeValue = numeric_fee ? parseFloat(numeric_fee) : 0.0;
+  const currencyVal = currency || 'EUR';
 
   try {
     // Insert into 'djs' table
     await pool.execute(
       `INSERT INTO djs
-        (dj_name, instagram, email, genres, soundcloud, city, phone, numeric_fee)
+        (dj_name, instagram, email, genres, soundcloud, city, phone, numeric_fee, currency)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         dj_name,
@@ -105,7 +107,8 @@ app.post('/djs', async (req, res) => {
         soundcloud || '',
         city || '',
         phone || '',
-        feeValue
+        feeValue,
+        currencyVal
       ]
     );
 
@@ -136,7 +139,8 @@ app.put('/djs/:dj_id', async (req, res) => {
     soundcloud,
     city,
     phone,
-    numeric_fee
+    numeric_fee,
+    currency
   } = req.body;
 
   // 'dj_name' is still required for updates
@@ -153,6 +157,7 @@ app.put('/djs/:dj_id', async (req, res) => {
 
     // Parse numeric fee or fallback to 0
     const feeValue = numeric_fee ? parseFloat(numeric_fee) : 0.0;
+    const currencyVal = currency || 'EUR';
 
     // Update
     await pool.execute(
@@ -164,7 +169,8 @@ app.put('/djs/:dj_id', async (req, res) => {
              soundcloud = ?,
              city = ?,
              phone = ?,
-             numeric_fee = ?
+             numeric_fee = ?,
+             currency = ?
        WHERE dj_id = ?`,
       [
         dj_name,
@@ -175,6 +181,7 @@ app.put('/djs/:dj_id', async (req, res) => {
         city || '',
         phone || '',
         feeValue,
+        currencyVal,
         djId
       ]
     );
