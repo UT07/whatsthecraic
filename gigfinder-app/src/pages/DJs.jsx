@@ -109,12 +109,8 @@ const DJs = () => {
             <p><strong>SoundCloud:</strong> {dj.soundcloud}</p>
             <p><strong>City:</strong> {dj.city}</p>
             <p><strong>Phone:</strong> {dj.phone}</p>
-            <p><strong>DJ Fee:</strong> {dj.dj_fee}</p>
+            <p><strong>DJ Fee:</strong> {dj.numeric_fee_fee}</p>
             <p><strong>Currency:</strong> {dj.currency}</p>
-            <p><strong>Numeric Fee:</strong> {dj.numeric_fee}</p>
-            {dj.converted_fee_eur && (
-              <p><strong>Fee in EUR:</strong> €{dj.converted_fee_eur}</p>
-            )}
 
             <div className="flex space-x-2 mt-2">
               <button 
