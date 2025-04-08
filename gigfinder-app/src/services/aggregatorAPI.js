@@ -11,11 +11,11 @@ const aggregatorAPI = {
         return acc;
       }, {});
 
-    const url = `${API_BASE}/api/gigs`; // 🔥 absolute URL
+    const url = `${API_BASE}/api/gigs`;
     console.log("Search URL:", url, "with params:", validFilters);
 
     const response = await axios.get(url, { params: validFilters });
-    return response.data.gigs; // .gigs because your API wraps it like { gigs: [...] }
+    return response.data.gigs;
   }
 };
 
