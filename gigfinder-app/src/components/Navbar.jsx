@@ -26,11 +26,6 @@ const Navbar = ({ setIsAuthenticated }) => {
         )}
       </div>
       <div className="flex items-center space-x-4">
-        <input
-          type="text"
-          placeholder="Search..."
-          className="px-2 py-1 rounded bg-gray-800 text-green-400 placeholder-green-400"
-        />
         {isAuthenticated ? (
           <button onClick={handleLogout} className="hover:text-green-300">Logout</button>
         ) : (
