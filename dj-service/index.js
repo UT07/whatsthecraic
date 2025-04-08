@@ -225,7 +225,6 @@ app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
 
     const dj = rows[0];
 
-    // If currency is already EUR, no need to call the API
     if (dj.currency.toUpperCase() === 'EUR') {
       return res.json({
         original_amount: dj.numeric_fee,
@@ -234,23 +233,33 @@ app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
       });
     }
 
-    const response = await axios.post(CONVERTER_API, {
-      amount: dj.numeric_fee,
-      currency: dj.currency
-    }, {
-      headers: { 'Content-Type': 'application/json' }
-    });
+    // Try currency conversion
+    try {
+      const response = await axios.post(CONVERTER_API, {
+        amount: dj.numeric_fee,
+        currency: dj.currency
+      }, {
+        headers: { 'Content-Type': 'application/json' }
+      });
 
-    const converted = response.data.converted_amount_eur;
+      const converted = response.data.converted_amount_eur;
 
-    res.json({
-      original_amount: dj.numeric_fee,
-      original_currency: dj.currency,
-      converted_amount_eur: converted
-    });
+      return res.json({
+        original_amount: dj.numeric_fee,
+        original_currency: dj.currency,
+        converted_amount_eur: converted
+      });
+    } catch (conversionError) {
+      console.error(`Currency conversion failed: ${conversionError.message}`);
+      return res.status(502).json({
+        error: 'Currency conversion failed',
+        details: 'The converter service may be down or does not support this currency.'
+      });
+    }
+
   } catch (err) {
-    console.error('Error converting currency:', err);
-    res.status(500).json({ error: 'Currency conversion failed' });
+    console.error('Unexpected error in fee-in-eur endpoint:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
