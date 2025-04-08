@@ -241,7 +241,7 @@ app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
       });
       const response = await axios.post(CONVERTER_API, {
         amount: parseFloat(dj.numeric_fee),
-        currency: "USD"
+        currency: dj.currency
       },{
         headers: {
           'Content-Type': 'application/json'
