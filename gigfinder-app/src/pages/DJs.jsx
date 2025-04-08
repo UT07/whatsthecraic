@@ -109,7 +109,7 @@ const DJs = () => {
             <p><strong>SoundCloud:</strong> {dj.soundcloud}</p>
             <p><strong>City:</strong> {dj.city}</p>
             <p><strong>Phone:</strong> {dj.phone}</p>
-            <p><strong>DJ Fee:</strong> {dj.numeric_fee_fee}</p>
+            <p><strong>DJ Fee:</strong> {dj.numeric_fee}</p>
             <p><strong>Currency:</strong> {dj.currency}</p>
 
             <div className="flex space-x-2 mt-2">
