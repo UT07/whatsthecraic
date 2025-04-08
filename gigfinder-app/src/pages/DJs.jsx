@@ -1,4 +1,3 @@
-// src/pages/DJs.jsx
 import React, { useState, useEffect } from 'react';
 import djAPI from '../services/djAPI';
 import { motion } from 'framer-motion';
@@ -12,16 +11,30 @@ const DJs = () => {
 
   const { register, handleSubmit, reset } = useForm();
 
-  const fetchDJs = () => {
-    djAPI.getAllDJs()
-      .then((data) => {
-        setDjs(data);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("Error fetching DJs:", error);
-        setLoading(false);
-      });
+  const fetchDJs = async () => {
+    try {
+      const data = await djAPI.getAllDJs();
+      const djsWithFees = await Promise.all(
+        data.map(async (dj) => {
+          if (dj.currency?.toUpperCase() === 'EUR') {
+            return { ...dj, fee_eur: dj.numeric_fee };
+          }
+          try {
+            const res = await fetch(`/djs/${dj.dj_id}/fee-in-eur`);
+            const converted = await res.json();
+            return { ...dj, fee_eur: converted.converted_amount_eur };
+          } catch (err) {
+            console.error(`Failed to convert fee for DJ ${dj.dj_name}`, err);
+            return { ...dj, fee_eur: 'N/A' };
+          }
+        })
+      );
+      setDjs(djsWithFees);
+    } catch (error) {
+      console.error("Error fetching DJs:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -95,7 +108,6 @@ const DJs = () => {
         </button>
       </div>
 
-      {/* Two-column responsive grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {djs.map(dj => (
           <motion.div
@@ -109,9 +121,9 @@ const DJs = () => {
             <p><strong>SoundCloud:</strong> {dj.soundcloud}</p>
             <p><strong>City:</strong> {dj.city}</p>
             <p><strong>Phone:</strong> {dj.phone}</p>
+            <p><strong>Original Currency:</strong> {dj.currency}</p>
             <p><strong>DJ Fee:</strong> {dj.numeric_fee}</p>
-            <p><strong>Currency:</strong> {dj.currency}</p>
-
+            <p><strong>Fee in EUR:</strong> €{dj.fee_eur}</p>
             <div className="flex space-x-2 mt-2">
               <button 
                 onClick={() => openModal(dj)}
@@ -130,7 +142,6 @@ const DJs = () => {
         ))}
       </div>
 
-      {/* Modal for Add/Edit DJ */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-900 p-6 rounded w-11/12 max-w-md relative">
@@ -150,7 +161,7 @@ const DJs = () => {
               </div>
               <div className="mb-4">
                 <label className="block mb-1">Genres</label>
-                <input type="text" {...register("genres")} placeholder="Comma separated" className="w-full p-2 rounded bg-gray-800" />
+                <input type="text" {...register("genres")} className="w-full p-2 rounded bg-gray-800" />
               </div>
               <div className="mb-4">
                 <label className="block mb-1">SoundCloud</label>
@@ -167,8 +178,8 @@ const DJs = () => {
               <div className="mb-4">
                 <label className="block mb-1">Currency</label>
                 <select {...register("currency")} className="w-full p-2 rounded bg-gray-800">
-                  <option value="USD">USD</option>
                   <option value="EUR">EUR</option>
+                  <option value="USD">USD</option>
                   <option value="INR">INR</option>
                   <option value="GBP">GBP</option>
                   <option value="CNY">CNY</option>
@@ -178,7 +189,6 @@ const DJs = () => {
                 <label className="block mb-1">Numeric Fee</label>
                 <input type="number" step="0.01" {...register("numeric_fee")} className="w-full p-2 rounded bg-gray-800" />
               </div>
-
               <div className="flex justify-end space-x-2">
                 <button type="button" onClick={closeModal} className="bg-gray-500 px-4 py-2 rounded hover:bg-gray-600">Cancel</button>
                 <button type="submit" className="bg-green-500 px-4 py-2 rounded hover:bg-green-600">{editingDJ ? 'Update' : 'Add'}</button>
