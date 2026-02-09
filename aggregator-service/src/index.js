@@ -1,22 +1,40 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const crypto = require('crypto');
+const { z } = require('zod');
 
 const app = express();
 app.use(express.json());
 
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(v => v.trim())
+  : '*';
 app.use(cors({
-  origin: '*',
+  origin: corsOrigin,
   methods: ['GET', 'POST', 'OPTIONS'],
-  credentials: true
+  credentials: false
 }));
 
+app.use((req, res, next) => {
+  const requestId = crypto.randomUUID();
+  req.requestId = requestId;
+  res.set('X-Request-Id', requestId);
+  const started = Date.now();
+  res.on('finish', () => {
+    const durationMs = Date.now() - started;
+    console.log(`[${requestId}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
+  });
+  next();
+});
 
-const PORT = process.env.PORT || 4000;
-const TICKETMASTER_API_KEY = process.env.TICKETMASTER_API_KEY || 'bBXCDDCRVNxoaI1E0s3toMRN5saaPXPj';
-const VENUE_SERVICE_URL = process.env.VENUE_SERVICE_URL || 'http://venue-service.whatsthecraic.local:4001';
-const DJ_SERVICE_URL = process.env.DJ_SERVICE_URL || 'http://dj-service.whatsthecraic.local:4002';
-const LOCAL_EVENTS_URL = process.env.LOCAL_EVENTS_URL || 'http://events-service.whatsthecraic.local:4003';
+const PORT = process.env.PORT || process.env.AGGREGATOR_PORT || 4000;
+const TICKETMASTER_API_KEY = process.env.TICKETMASTER_API_KEY;
+const VENUE_SERVICE_URL = process.env.VENUE_SERVICE_URL || 'http://venue-service:4001';
+const DJ_SERVICE_URL = process.env.DJ_SERVICE_URL || 'http://dj-service:4002';
+const LOCAL_EVENTS_URL = process.env.LOCAL_EVENTS_URL || 'http://events-service:4003';
+
+const http = axios.create({ timeout: 8000 });
 
 const calculatePopularityScore = (gig, venues, djs) => {
   let score = 0;
@@ -37,34 +55,105 @@ const calculatePopularityScore = (gig, venues, djs) => {
   return score;
 };
 
-const normalize = str => str?.toLowerCase().trim();
+const normalize = str => (str ?? '').toString().toLowerCase().trim();
+
+const sendError = (res, status, code, message, details) => {
+  return res.status(status).json({
+    error: {
+      code,
+      message,
+      details,
+      requestId: res.get('X-Request-Id')
+    }
+  });
+};
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+app.get('/v1/events/search', async (req, res) => {
+  try {
+    const response = await http.get(`${LOCAL_EVENTS_URL}/v1/events/search`, { params: req.query });
+    return res.json(response.data);
+  } catch (error) {
+    console.error('Error proxying /v1/events/search:', error.message);
+    return sendError(res, 502, 'upstream_error', 'Failed to fetch events');
+  }
+});
+
+app.get('/v1/events/:id', async (req, res) => {
+  try {
+    const response = await http.get(`${LOCAL_EVENTS_URL}/v1/events/${req.params.id}`);
+    return res.json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to fetch event');
+  }
+});
+
+app.post('/v1/events/:id/save', async (req, res) => {
+  try {
+    const response = await http.post(
+      `${LOCAL_EVENTS_URL}/v1/events/${req.params.id}/save`,
+      {},
+      { headers: { Authorization: req.headers.authorization || '' } }
+    );
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to save event');
+  }
+});
 
 app.get('/api/gigs', async (req, res) => {
   try {
-    const [venuesRes, djsRes] = await Promise.all([
-      axios.get(`${VENUE_SERVICE_URL}/venues`),
-      axios.get(`${DJ_SERVICE_URL}/djs`)
+    const querySchema = z.object({
+      city: z.string().min(1).optional(),
+      genre: z.string().min(1).optional(),
+      djName: z.string().min(1).optional(),
+      venue: z.string().min(1).optional()
+    });
+    const parsed = querySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return sendError(res, 400, 'invalid_query', 'Invalid query parameters', parsed.error.flatten());
+    }
+
+    const [venuesRes, djsRes] = await Promise.allSettled([
+      http.get(`${VENUE_SERVICE_URL}/venues`),
+      http.get(`${DJ_SERVICE_URL}/djs`)
     ]);
 
-    const venues = venuesRes.data;
-    const djs = djsRes.data;
+    const venues = venuesRes.status === 'fulfilled' ? venuesRes.value.data : [];
+    const djs = djsRes.status === 'fulfilled' ? djsRes.value.data : [];
 
-    const city = req.query.city || 'Dublin';
-    const genre = normalize(req.query.genre);
-    const djName = normalize(req.query.djName);
-    const venueName = normalize(req.query.venue);
+    if (venuesRes.status !== 'fulfilled') {
+      console.warn('Venue service unavailable:', venuesRes.reason?.message);
+    }
+    if (djsRes.status !== 'fulfilled') {
+      console.warn('DJ service unavailable:', djsRes.reason?.message);
+    }
+
+    const city = parsed.data.city || 'Dublin';
+    const genre = normalize(parsed.data.genre);
+    const djName = normalize(parsed.data.djName);
+    const venueName = normalize(parsed.data.venue);
 
     let tmEvents = [];
-    try {
-      const tmUrl = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TICKETMASTER_API_KEY}&city=${city}${genre ? `&classificationName=${genre}` : ''}`;
-      const tmRes = await axios.get(tmUrl);
-      tmEvents = tmRes.data._embedded?.events || [];
-    } catch (err) {
-      if (err.response?.status === 429) {
-        console.warn('Ticketmaster API rate limit reached.');
-      } else {
-        throw err;
+    if (TICKETMASTER_API_KEY) {
+      try {
+        const tmUrl = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TICKETMASTER_API_KEY}&city=${city}${genre ? `&classificationName=${genre}` : ''}`;
+        const tmRes = await http.get(tmUrl);
+        tmEvents = tmRes.data._embedded?.events || [];
+      } catch (err) {
+        if (err.response?.status === 429) {
+          console.warn('Ticketmaster API rate limit reached.');
+        } else {
+          console.warn('Ticketmaster API error:', err.message);
+        }
       }
+    } else {
+      console.warn('TICKETMASTER_API_KEY not set; skipping Ticketmaster fetch.');
     }
 
     const formattedTMEvents = tmEvents.map(event => {
@@ -76,7 +165,7 @@ app.get('/api/gigs', async (req, res) => {
         normalize(dj.dj_name).includes(normalize(eventName))
       );
 
-      return {
+      const formatted = {
         eventName,
         date: event.dates?.start?.localDate || 'N/A',
         time: event.dates?.start?.localTime || 'N/A',
@@ -85,12 +174,18 @@ app.get('/api/gigs', async (req, res) => {
         djs: matchedDJs.map(dj => dj.dj_name),
         ticketLink: event.url,
         isLocal: false,
-        popularityScore: calculatePopularityScore(event, venues, djs),
         source: 'Ticketmaster'
       };
+      formatted.popularityScore = calculatePopularityScore(formatted, venues, djs);
+      return formatted;
     });
 
-    const localRawEvents = (await axios.get(`${LOCAL_EVENTS_URL}/events`)).data;
+    let localRawEvents = [];
+    try {
+      localRawEvents = (await http.get(`${LOCAL_EVENTS_URL}/events`)).data;
+    } catch (err) {
+      console.warn('Local events service unavailable:', err.message);
+    }
 
     const formattedLocalEvents = localRawEvents.map(ev => {
       const matchedVenue = venues.find(v => normalize(ev.venue_name || '').includes(normalize(v.name)));
@@ -99,7 +194,7 @@ app.get('/api/gigs', async (req, res) => {
         normalize(dj.dj_name).includes(normalize(ev.event_name))
       );
 
-      return {
+      const formatted = {
         eventName: ev.event_name || 'N/A',
         date: ev.date_local || 'N/A',
         time: ev.time_local || 'N/A',
@@ -108,9 +203,10 @@ app.get('/api/gigs', async (req, res) => {
         djs: matchedDJs.map(d => d.dj_name),
         ticketLink: ev.url || '#',
         isLocal: true,
-        popularityScore: calculatePopularityScore(ev, venues, djs),
         source: 'Local'
       };
+      formatted.popularityScore = calculatePopularityScore(formatted, venues, djs);
+      return formatted;
     });
 
     const matchesFilters = (event) => {
@@ -140,7 +236,7 @@ app.get('/api/gigs', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching gigs:', error.message);
-    res.status(500).json({ error: error.message });
+    return sendError(res, 500, 'internal_error', 'Failed to fetch gigs');
   }
 });
 

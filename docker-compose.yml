@@ -1,77 +1,147 @@
-version: "3.8"
-
 services:
-  # 1) Local Events Service
-  local-events:
-    image: 395338916491.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/events-service:latest
-    container_name: local_events_service
+  db:
+    image: mysql:8.0
+    container_name: gigsdb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: localroot
+      MYSQL_DATABASE: ${DB_NAME:-gigsdb}
+      MYSQL_USER: ${DB_USER:-app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-app}
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./init-gigsdb.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-plocalroot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  events-service:
+    build:
+      context: ./events-service
+    container_name: events_service
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-app}
+      DB_PASSWORD: ${DB_PASSWORD:-app}
+      DB_NAME: ${DB_NAME:-gigsdb}
+      API_PORT: ${EVENTS_SERVICE_PORT:-4003}
     ports:
       - "4003:4003"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4003/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dj-service:
+    build:
+      context: ./dj-service
+    container_name: dj_service
     env_file:
       - .env
     environment:
-      DB_HOST: "${DB_HOST}"
-      DB_PORT: "${DB_PORT}"
-      DB_USER: "${DB_USER}"
-      DB_PASSWORD: "${DB_PASSWORD}"
-      DB_NAME: "${DB_NAME}"
-    depends_on:
-      - dj-service
-      - venue-service
-
-  # 2) DJ Service
-  dj-service:
-    image: 395338916491.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/dj-service:latest
-    container_name: dj_service
+      DB_HOST: db
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-app}
+      DB_PASSWORD: ${DB_PASSWORD:-app}
+      DB_NAME: ${DB_NAME:-gigsdb}
+      API_PORT: ${DJ_SERVICE_PORT:-4002}
     ports:
       - "4002:4002"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4002/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  venue-service:
+    build:
+      context: ./venue-service
+    container_name: venue_service
     env_file:
       - .env
     environment:
-      DB_HOST: "${DB_HOST}"
-      DB_PORT: "${DB_PORT}"
-      DB_USER: "${DB_USER}"
-      DB_PASSWORD: "${DB_PASSWORD}"
-      DB_NAME: "${DB_NAME}"
-
-  # 3) Venue Service
-  venue-service:
-    image: 395338916491.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/venue-service:latest
-    container_name: venue_service
+      DB_HOST: db
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-app}
+      DB_PASSWORD: ${DB_PASSWORD:-app}
+      DB_NAME: ${DB_NAME:-gigsdb}
+      API_PORT: ${VENUE_SERVICE_PORT:-4001}
     ports:
       - "4001:4001"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4001/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  auth-service:
+    build:
+      context: ./auth-service
+    container_name: auth_service
     env_file:
       - .env
     environment:
-      DB_HOST: "${DB_HOST}"
-      DB_PORT: "${DB_PORT}"
-      DB_USER: "${DB_USER}"
-      DB_PASSWORD: "${DB_PASSWORD}"
-      DB_NAME: "${DB_NAME}"
+      DB_HOST: db
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-app}
+      DB_PASSWORD: ${DB_PASSWORD:-app}
+      DB_NAME: ${DB_NAME:-gigsdb}
+      PORT: ${AUTH_SERVICE_PORT:-3001}
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  # 4) Aggregator Service
   aggregator:
-    image: 395338916491.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/aggregator-service:latest
+    build:
+      context: ./aggregator-service
     container_name: aggregator_service
+    env_file:
+      - .env
+    environment:
+      VENUE_SERVICE_URL: ${VENUE_SERVICE_URL:-http://venue-service:4001}
+      DJ_SERVICE_URL: ${DJ_SERVICE_URL:-http://dj-service:4002}
+      LOCAL_EVENTS_URL: ${LOCAL_EVENTS_URL:-http://events-service:4003}
+      TICKETMASTER_API_KEY: ${TICKETMASTER_API_KEY}
+      PORT: ${AGGREGATOR_PORT:-4000}
     ports:
       - "4000:4000"
-    env_file:
-      - .env
-    environment:
-      # Database details
-      DB_HOST: "${DB_HOST}"
-      DB_PORT: "${DB_PORT}"
-      DB_USER: "${DB_USER}"
-      DB_PASSWORD: "${DB_PASSWORD}"
-      DB_NAME: "${DB_NAME}"
-      
-      VENUE_SERVICE_URL: "http://venue-service.whatsthecraic.local:4001"
-      DJ_SERVICE_URL: "http://dj-service.whatsthecraic.local:4002"
-      LOCAL_EVENTS_URL: "http://events-service.whatsthecraic.local:4003"
-
-      # Ticketmaster Key
-      TICKETMASTER_API_KEY: "${TICKETMASTER_API_KEY}"
     depends_on:
-      - local-events
-      - dj-service
-      - venue-service
+      events-service:
+        condition: service_healthy
+      dj-service:
+        condition: service_healthy
+      venue-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db_data:
