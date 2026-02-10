@@ -2,6 +2,10 @@ const axios = require('axios');
 const crypto = require('crypto');
 
 const http = axios.create({ timeout: 10000 });
+const XRAVES_SCRAPER_TIMEOUT_MS = Number.parseInt(
+  process.env.XRAVES_SCRAPER_TIMEOUT_MS || '30000',
+  10
+);
 
 const toMysqlDateTime = (value) => {
   if (!value) return null;
@@ -406,10 +410,24 @@ const extractXravesEvents = (nextData) => {
   const fallback = nextData?.props?.pageProps?.fallback;
   if (!fallback || typeof fallback !== 'object') return [];
   const candidates = [];
-  for (const value of Object.values(fallback)) {
+  const collect = (value) => {
+    if (!value) return;
     if (Array.isArray(value)) {
       candidates.push(...value);
+      return;
     }
+    if (typeof value === 'object') {
+      if (Array.isArray(value.data)) {
+        candidates.push(...value.data);
+        return;
+      }
+      for (const nested of Object.values(value)) {
+        collect(nested);
+      }
+    }
+  };
+  for (const value of Object.values(fallback)) {
+    collect(value);
   }
   return candidates.filter(item => {
     const attrs = item?.attributes;
@@ -447,12 +465,31 @@ const extractXravesImages = (attrs) => {
   return images;
 };
 
-const ingestXraves = async (pool, { baseUrl, userAgent, city, startDate, endDate, enabled = true }) => {
-  if (!enabled) {
-    return { source: 'xraves', skipped: true, reason: 'disabled', count: 0 };
+const stripTrailingSlash = (value) => {
+  if (!value || typeof value !== 'string') return value;
+  return value.endsWith('/') ? value.slice(0, -1) : value;
+};
+
+const fetchXravesNextData = async ({ baseUrl, userAgent, scraperUrl }) => {
+  if (scraperUrl) {
+    try {
+      const response = await http.post(
+        `${stripTrailingSlash(scraperUrl)}/scrape`,
+        { url: baseUrl, userAgent },
+        { timeout: XRAVES_SCRAPER_TIMEOUT_MS }
+      );
+      const nextData = response.data?.nextData || response.data?.next_data || response.data?.data;
+      if (nextData && typeof nextData === 'object') {
+        return nextData;
+      }
+      if (typeof nextData === 'string') {
+        return safeJsonParse(nextData);
+      }
+    } catch (error) {
+      console.warn('XRaves scraper failed, falling back to direct fetch:', error.message);
+    }
   }
 
-  const resolvedBaseUrl = baseUrl || 'https://xraves.ie/';
   const headers = {
     'User-Agent': userAgent || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -460,8 +497,21 @@ const ingestXraves = async (pool, { baseUrl, userAgent, city, startDate, endDate
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache'
   };
-  const response = await http.get(resolvedBaseUrl, { headers });
-  const nextData = extractXravesNextData(response.data);
+  const response = await http.get(baseUrl, { headers });
+  return extractXravesNextData(response.data);
+};
+
+const ingestXraves = async (pool, { baseUrl, userAgent, scraperUrl, city, startDate, endDate, enabled = true }) => {
+  if (!enabled) {
+    return { source: 'xraves', skipped: true, reason: 'disabled', count: 0 };
+  }
+
+  const resolvedBaseUrl = baseUrl || 'https://xraves.ie/';
+  const nextData = await fetchXravesNextData({
+    baseUrl: resolvedBaseUrl,
+    userAgent,
+    scraperUrl
+  });
   if (!nextData) {
     return { source: 'xraves', skipped: true, reason: 'missing_next_data', count: 0 };
   }

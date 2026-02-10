@@ -1,28 +1,29 @@
-import React, { useState, useEffect } from 'react';
-import { Doughnut, Bar, Scatter } from 'react-chartjs-2';
+import React, { useEffect, useState } from 'react';
+import { Doughnut, Bar } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
 import eventsAPI from '../services/eventsAPI';
 import djAPI from '../services/djAPI';
-import aggregatorAPI from '../services/aggregatorAPI';
 import venueAPI from '../services/venueAPI';
+import authAPI from '../services/authAPI';
+import { getToken } from '../services/apiClient';
 
 Chart.register(...registerables);
+Chart.defaults.font.family = 'Space Grotesk, system-ui, sans-serif';
+Chart.defaults.color = '#2b251f';
 
-// Common options for Chart.js charts
-const commonOptions = {
+const chartOptions = {
   plugins: {
     legend: {
-      labels: { font: { size: 16 } },
+      labels: { font: { size: 13 } }
     },
     tooltip: {
-      bodyFont: { size: 16 },
-      titleFont: { size: 18 },
-    },
+      bodyFont: { size: 13 },
+      titleFont: { size: 14 }
+    }
   },
-  layout: { padding: 20 },
+  layout: { padding: 12 }
 };
 
-// Helper: Compute events by city for Doughnut chart
 const computeEventsByCity = (events = []) => {
   const cityCount = {};
   events.forEach(event => {
@@ -34,75 +35,39 @@ const computeEventsByCity = (events = []) => {
   const labels = Object.keys(cityCount);
   const data = labels.map(city => cityCount[city]);
   const palette = [
-    'rgba(255, 99, 132, 0.8)',
-    'rgba(54, 162, 235, 0.8)',
-    'rgba(255, 206, 86, 0.8)',
-    'rgba(75, 192, 192, 0.8)',
-    'rgba(153, 102, 255, 0.8)',
-    'rgba(255, 159, 64, 0.8)',
-    'rgba(199, 21, 133, 0.8)',
-    'rgba(100, 149, 237, 0.8)'
+    '#ff6b35',
+    '#2ec4b6',
+    '#f6b93b',
+    '#ff9f1c',
+    '#2d4059',
+    '#b8b1a9'
   ];
-  const backgroundColor = labels.map((_, i) => palette[i % palette.length]);
   return {
     labels,
-    datasets: [{ label: 'Events by City', data, backgroundColor }],
+    datasets: [{ label: 'Events by City', data, backgroundColor: labels.map((_, i) => palette[i % palette.length]) }]
   };
 };
 
-// Helper: Compute top DJs by fee for Bar chart
 const computeTopDJsByFee = (djs = []) => {
   const sorted = djs
     .filter(dj => dj.numeric_fee !== null && dj.numeric_fee !== undefined)
     .sort((a, b) => parseFloat(b.numeric_fee) - parseFloat(a.numeric_fee))
     .slice(0, 5);
-  const labels = sorted.map(dj => dj.dj_name);
-  const data = sorted.map(dj => parseFloat(dj.numeric_fee));
-  const colors = [
-    'rgba(255, 99, 132, 0.8)',
-    'rgba(54, 162, 235, 0.8)',
-    'rgba(255, 206, 86, 0.8)',
-    'rgba(75, 192, 192, 0.8)',
-    'rgba(153, 102, 255, 0.8)',
-  ];
   return {
-    labels,
-    datasets: [{ label: 'Top DJs by Fee', data, backgroundColor: colors.slice(0, data.length) }],
+    labels: sorted.map(dj => dj.dj_name),
+    datasets: [
+      {
+        label: 'Top DJs by Fee',
+        data: sorted.map(dj => parseFloat(dj.numeric_fee)),
+        backgroundColor: '#2d4059'
+      }
+    ]
   };
 };
 
-// Helper: Compute DJ genre distribution for Scatter Plot
-const computeDJGenresForScatter = (djs = []) => {
-  const genreCount = {};
-  djs.forEach(dj => {
-    if (dj.genres) {
-      dj.genres.split(',').forEach(g => {
-        const genre = g.trim();
-        if (genre) {
-          genreCount[genre] = (genreCount[genre] || 0) + 1;
-        }
-      });
-    }
-  });
-  const genres = Object.keys(genreCount);
-  const scatterData = genres.map(genre => ({ x: genre, y: genreCount[genre] }));
-  return {
-    datasets: [{
-      label: 'DJ Genre Distribution',
-      data: scatterData,
-      backgroundColor: 'rgba(75,192,192,1)',
-      borderColor: 'rgba(75,192,192,0.5)',
-      pointRadius: 6,
-    }],
-  };
-};
-
-// Helper: Compute event count per venue
-const computeEventCountByVenue = (events = [], aggregatorEvents, venues = []) => {
-  const aggregatorArr = Array.isArray(aggregatorEvents) ? aggregatorEvents : [];
-  const allEvents = [...events, ...aggregatorArr];
+const computeEventCountByVenue = (events = [], venues = []) => {
   const venueEventCount = {};
-  allEvents.forEach(event => {
+  events.forEach(event => {
     if (event.venue_name) {
       const venueName = event.venue_name.trim().toLowerCase();
       venueEventCount[venueName] = (venueEventCount[venueName] || 0) + 1;
@@ -113,137 +78,131 @@ const computeEventCountByVenue = (events = [], aggregatorEvents, venues = []) =>
     const key = label.trim().toLowerCase();
     return venueEventCount[key] || 0;
   });
-  const palette = [
-    'rgba(255, 99, 132, 0.8)',
-    'rgba(54, 162, 235, 0.8)',
-    'rgba(255, 206, 86, 0.8)',
-    'rgba(75, 192, 192, 0.8)',
-    'rgba(153, 102, 255, 0.8)',
-    'rgba(255, 159, 64, 0.8)',
-    'rgba(199, 21, 133, 0.8)',
-    'rgba(100, 149, 237, 0.8)'
-  ];
-  const backgroundColor = labels.map((_, i) => palette[i % palette.length]);
-  return { labels, data, backgroundColor };
+  return {
+    labels,
+    datasets: [{ label: 'Events per Venue', data, backgroundColor: '#ff6b35' }]
+  };
 };
 
 const Dashboard = () => {
-  const [graphs, setGraphs] = useState(null);
-  const [scatterData, setScatterData] = useState(null);
-  const [venueData, setVenueData] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [djs, setDjs] = useState([]);
+  const [venues, setVenues] = useState([]);
+  const [spotifyStatus, setSpotifyStatus] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState('grid');
-  const [fullscreenIndex, setFullscreenIndex] = useState(null);
+
+  const token = getToken();
+  const authBase = process.env.REACT_APP_AUTH_BASE || 'https://auth.whatsthecraic.run.place';
 
   useEffect(() => {
-    Promise.all([
-      eventsAPI.getAllEvents(),
-      aggregatorAPI.searchEvents({}),
-      djAPI.getAllDJs(),
-      venueAPI.getAllVenues()
-    ])
-      .then(([events, aggregatorEvents, djs, venues]) => {
-        const cityData = computeEventsByCity(events);
-        const topDJsData = computeTopDJsByFee(djs);
-        const djGenreScatter = computeDJGenresForScatter(djs);
-        const venueCountData = computeEventCountByVenue(events, aggregatorEvents, venues);
-        setGraphs({ cityData, topDJsData });
-        setScatterData(djGenreScatter);
-        setVenueData(venueCountData);
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [eventsRes, djsRes, venuesRes] = await Promise.all([
+          eventsAPI.searchEvents({}),
+          djAPI.getAllDJs(),
+          venueAPI.getAllVenues()
+        ]);
+        setEvents(eventsRes.events || []);
+        setDjs(Array.isArray(djsRes) ? djsRes : []);
+        setVenues(Array.isArray(venuesRes) ? venuesRes : []);
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      } finally {
         setLoading(false);
-      })
-      .catch(error => {
-        console.error("Error fetching dashboard data:", error);
-        setLoading(false);
-      });
+      }
+    };
+
+    load();
   }, []);
 
-  const toggleViewMode = () => {
-    setViewMode(prev => (prev === 'grid' ? 'list' : 'grid'));
-  };
+  useEffect(() => {
+    const loadSpotify = async () => {
+      if (!token) return;
+      try {
+        const status = await authAPI.getSpotifyStatus();
+        setSpotifyStatus(status);
+      } catch (error) {
+        setSpotifyStatus(null);
+      }
+    };
+    loadSpotify();
+  }, [token]);
 
-  const toggleFullscreen = (index) => {
-    setFullscreenIndex(prev => (prev === index ? null : index));
-  };
+  if (loading) {
+    return (
+      <div className="card max-w-md mx-auto text-center">
+        <p className="text-muted">Loading your insights...</p>
+      </div>
+    );
+  }
 
-  if (loading) return <p className="text-green-400">Loading Dashboard...</p>;
-  if (!graphs || !scatterData || !venueData) return <p className="text-green-400">No data available</p>;
-
-  const venueChartData = {
-    labels: venueData.labels,
-    datasets: [{
-      label: 'Number of Events',
-      data: venueData.data,
-      backgroundColor: venueData.backgroundColor,
-    }],
-  };
+  const cityChart = computeEventsByCity(events);
+  const djChart = computeTopDJsByFee(djs);
+  const venueChart = computeEventCountByVenue(events, venues);
 
   return (
-    <div>
-      <div className="flex justify-end mb-4">
-        <button onClick={toggleViewMode} className="px-3 py-1 text-sm text-blue-200 bg-blue-800 hover:bg-blue-700 rounded transition">
-          Toggle to {viewMode === 'grid' ? 'List' : 'Grid'} View
-        </button>
-      </div>
-      <div className={`grid gap-6 ${viewMode === 'list' ? 'grid-cols-1' : 'grid-cols-2'}`}>
-        {/* Doughnut Chart for Events by City */}
-        <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 0 ? 'h-screen' : 'h-[42rem]'} transition-all`}>
-          <h2 className="text-2xl mb-2">Events by City</h2>
-          <button onClick={() => toggleFullscreen(0)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
-            {fullscreenIndex === 0 ? 'Exit Fullscreen' : 'Fullscreen'}
-          </button>
-          <Doughnut data={graphs.cityData} options={commonOptions} />
+    <div className="space-y-8">
+      <section className="grid-auto">
+        <div className="card animate-fade-up">
+          <div className="badge mb-3">Personalization</div>
+          <h2 className="section-title mb-2">Morning brief</h2>
+          <p className="section-subtitle">
+            See the hottest drops in your cities, then sync Spotify to sharpen the feed.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <a
+              className="btn btn-primary"
+              href={token ? `${authBase}/auth/spotify/login?token=${token}` : '/auth/login'}
+            >
+              {spotifyStatus?.linked ? 'Re-link Spotify' : 'Connect Spotify'}
+            </a>
+            <button
+              className="btn btn-outline"
+              onClick={() => authAPI.syncSpotify().catch(() => {})}
+              disabled={!spotifyStatus?.linked}
+            >
+              Sync Now
+            </button>
+          </div>
+          <p className="text-muted text-sm mt-3">
+            {spotifyStatus?.linked ? `Linked · last sync ${spotifyStatus?.last_synced_at || 'pending'}` : 'Not linked yet'}
+          </p>
         </div>
-        {/* Bar Chart for Top DJs by Fee */}
-        <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 1 ? 'h-screen' : 'h-[42rem]'} transition-all`}>
-          <h2 className="text-2xl mb-2">Top DJs by Fee</h2>
-          <button onClick={() => toggleFullscreen(1)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
-            {fullscreenIndex === 1 ? 'Exit Fullscreen' : 'Fullscreen'}
-          </button>
-          <Bar data={graphs.topDJsData} options={commonOptions} />
+
+        <div className="card animate-fade-up">
+          <div className="badge mb-3">At a glance</div>
+          <div className="grid gap-4">
+            <div>
+              <p className="text-muted text-sm">Events (next 90 days)</p>
+              <p className="text-3xl font-semibold">{events.length}</p>
+            </div>
+            <div>
+              <p className="text-muted text-sm">DJ profiles</p>
+              <p className="text-3xl font-semibold">{djs.length}</p>
+            </div>
+            <div>
+              <p className="text-muted text-sm">Venues tracked</p>
+              <p className="text-3xl font-semibold">{venues.length}</p>
+            </div>
+          </div>
         </div>
-        {/* Bar Chart for Event Count by Venue */}
-        <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 2 ? 'h-screen' : 'h-[42rem]'} transition-all`}>
-          <h2 className="text-2xl mb-2">Event Count by Venue</h2>
-          <button onClick={() => toggleFullscreen(2)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
-            {fullscreenIndex === 2 ? 'Exit Fullscreen' : 'Fullscreen'}
-          </button>
-          <Bar data={venueChartData} options={commonOptions} />
+      </section>
+
+      <section className="grid-auto">
+        <div className="card">
+          <h3 className="text-lg font-semibold mb-3">Events by City</h3>
+          <Doughnut data={cityChart} options={chartOptions} />
         </div>
-        {/* Scatter Plot for DJ Genre Distribution */}
-        <div className={`bg-gray-800 p-4 rounded ${fullscreenIndex === 3 ? 'h-screen' : 'h-[42rem]'} transition-all`}>
-          <h2 className="text-2xl mb-2">DJ Genre Distribution (Scatter Plot)</h2>
-          <button onClick={() => toggleFullscreen(3)} className="mb-2 p-1 bg-yellow-500 text-white rounded">
-            {fullscreenIndex === 3 ? 'Exit Fullscreen' : 'Fullscreen'}
-          </button>
-          <Scatter 
-            data={scatterData} 
-            options={{
-              ...commonOptions,
-              scales: {
-                x: {
-                  type: 'category',
-                  labels: scatterData.datasets[0].data.map(point => point.x),
-                  title: {
-                    display: true,
-                    text: 'Genre',
-                    font: { size: 18 },
-                  },
-                  ticks: { font: { size: 16 } }
-                },
-                y: {
-                  title: {
-                    display: true,
-                    text: 'Frequency',
-                    font: { size: 18 },
-                  },
-                  ticks: { font: { size: 16 } }
-                }
-              }
-            }} 
-          />
+        <div className="card">
+          <h3 className="text-lg font-semibold mb-3">Top DJs by Fee</h3>
+          <Bar data={djChart} options={chartOptions} />
         </div>
-      </div>
+        <div className="card">
+          <h3 className="text-lg font-semibold mb-3">Events per Venue</h3>
+          <Bar data={venueChart} options={chartOptions} />
+        </div>
+      </section>
     </div>
   );
 };

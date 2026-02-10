@@ -97,6 +97,25 @@ const sendError = (res, status, code, message, details) => {
   });
 };
 
+const proxyRequest = async (req, res, { url, method = 'get' }) => {
+  try {
+    const response = await http.request({
+      url,
+      method,
+      params: req.query,
+      data: req.body,
+      headers: {
+        Authorization: req.headers.authorization || ''
+      }
+    });
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    const message = error.response?.data?.error?.message || error.message || 'Upstream request failed';
+    return sendError(res, status, 'upstream_error', message);
+  }
+};
+
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
@@ -163,6 +182,24 @@ app.get('/v1/users/me/feed', async (req, res) => {
     return sendError(res, status, 'upstream_error', 'Failed to fetch feed');
   }
 });
+
+app.get('/events', (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/events` }));
+app.get('/events/:id', (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/events/${req.params.id}` }));
+app.post('/events', (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/events`, method: 'post' }));
+app.put('/events/:id', (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/events/${req.params.id}`, method: 'put' }));
+app.delete('/events/:id', (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/events/${req.params.id}`, method: 'delete' }));
+
+app.get('/djs', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs` }));
+app.get('/djs/:dj_id', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs/${req.params.dj_id}` }));
+app.post('/djs', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs`, method: 'post' }));
+app.put('/djs/:dj_id', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs/${req.params.dj_id}`, method: 'put' }));
+app.delete('/djs/:dj_id', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs/${req.params.dj_id}`, method: 'delete' }));
+
+app.get('/venues', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues` }));
+app.get('/venues/:id', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues/${req.params.id}` }));
+app.post('/venues', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues`, method: 'post' }));
+app.put('/venues/:id', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues/${req.params.id}`, method: 'put' }));
+app.delete('/venues/:id', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues/${req.params.id}`, method: 'delete' }));
 
 app.get('/api/gigs', async (req, res) => {
   try {

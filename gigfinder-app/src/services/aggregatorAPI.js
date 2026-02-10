@@ -1,6 +1,4 @@
-import axios from 'axios';
-
-const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:4000';
+import { apiClient } from './apiClient';
 
 const aggregatorAPI = {
   searchEvents: async (filters) => {
@@ -11,11 +9,11 @@ const aggregatorAPI = {
         return acc;
       }, {});
 
-    const url = `${API_BASE}/api/gigs`;
+    const url = `/v1/events/search`;
     console.log("Search URL:", url, "with params:", validFilters);
 
-    const response = await axios.get(url, { params: validFilters });
-    return response.data.gigs;
+    const response = await apiClient.get(url, { params: validFilters });
+    return response.data.events || [];
   }
 };
 

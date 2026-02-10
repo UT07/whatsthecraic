@@ -1,115 +1,120 @@
-# WhatsTheCraic 2.0 — Dev Setup
+# WhatsTheCraic
 
-## Overview
-This repo is a monorepo for WhatsTheCraic services:
-- `aggregator-service` — unified gigs feed (local + external sources)
-- `events-service` — local events CRUD
-- `dj-service` — DJ directory
-- `venue-service` — venue directory
-- `auth-service` — email/password auth (JWT)
+A monorepo for the WhatsTheCraic gigs platform: ingestion, canonical events API, personalization, and two React frontends.
 
-## Local Run (Docker)
-1. Copy env template and set values:
+## Repo Layout
+- `aggregator-service` — edge API that proxies canonical events and legacy `/api/gigs`.
+- `events-service` — canonical events API + ingestion + personalization scoring.
+- `dj-service` — DJ directory service.
+- `venue-service` — venue directory service.
+- `auth-service` — email/password auth + Spotify OAuth + user preferences.
+- `gigfinder-app` — primary React client.
+- `gigfinder` — legacy/alternate React client (now tracked as a normal folder).
+- `docs/ops-runbook.md` — deployment + verification runbook.
+- `docs/migrations.md` — DB migrations.
+- `init-gigsdb.sql` — local DB bootstrap data.
+
+## Quick Start (Local)
+1. Copy the env template and set values.
    - `cp .env.example .env`
-   - Set `JWT_SECRET` (required)
-   - Set `TICKETMASTER_API_KEY` (optional for Ticketmaster)
-2. Start everything:
+   - Set `JWT_SECRET`.
+   - Optional: `TICKETMASTER_API_KEY`, `EVENTBRITE_API_TOKEN`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`.
+2. Start everything.
    - `docker compose up --build`
+3. Verify health.
+   - `curl -fsS http://localhost:4000/health`
 
-Services will be available on:
+## Services & Ports
 - Aggregator: `http://localhost:4000`
 - Events: `http://localhost:4003`
 - DJs: `http://localhost:4002`
 - Venues: `http://localhost:4001`
 - Auth: `http://localhost:3001`
 
-Health checks:
-- `GET /health` on each service
-Metrics:
-- `GET /metrics` on each service
+Health + metrics:
+- `GET /health`
+- `GET /metrics`
 
-## Environment Variables
-From `./.env.example`:
-- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
-- `TICKETMASTER_API_KEY`
-- `TICKETMASTER_COUNTRY_CODE`
-- `EVENTBRITE_API_TOKEN`
-- `EVENTBRITE_ORG_IDS`
-- `XRAVES_ENABLED`, `XRAVES_BASE_URL`, `XRAVES_USER_AGENT`
-- `VENUE_SERVICE_URL`, `DJ_SERVICE_URL`, `LOCAL_EVENTS_URL`
-- `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `TRUST_PROXY`
-- `AGGREGATOR_PORT`, `DJ_SERVICE_PORT`, `EVENTS_SERVICE_PORT`, `VENUE_SERVICE_PORT`, `AUTH_SERVICE_PORT`
-- `JWT_SECRET`
-- `INGESTION_ENABLED`, `INGESTION_STALE_HOURS`, `INGESTION_DEFAULT_CITY`, `INGESTION_MAX_PAGES`
-- `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`, `SPOTIFY_SCOPES`
-
-## Architecture Notes
-- MySQL is used for DJs, Venues, Local Events, and Users.
-- `init-gigsdb.sql` seeds local dev data.
-- Aggregator queries local services and Ticketmaster; if a source is unavailable, it returns partial results.
-
-## Phase 1 API (Canonical Events)
+## Canonical Events API (Implemented)
 - `GET /v1/events/search?city=&from=&to=&genres=&priceMax=&source=`
 - `GET /v1/events/:id`
-- `POST /v1/events/:id/save` (requires `Authorization: Bearer <token>` from auth-service)
-Personalization:
-- `GET /v1/events/search?rank=personalized` with `Authorization: Bearer <token>` will include `rank_score` and `rank_reasons`.
+- `POST /v1/events/:id/save` (requires `Authorization: Bearer <token>`)
 
-Spotify linking (auth-service):
-- `GET /auth/spotify/login` with `Authorization: Bearer <token>`
-- Browser-friendly: `GET /auth/spotify/login?token=<JWT>` (token is redacted in logs)
+Personalized ranking:
+- `GET /v1/events/search?rank=personalized` (requires `Authorization: Bearer <token>`)
+- Returns `rank_score` and `rank_reasons` when personalization is applied.
 
-## Phase 2 API (Personalization)
+Legacy/combined gigs:
+- `GET /api/gigs` (aggregator; combines local + Ticketmaster with simple ranking)
+
+## Feed API (Implemented)
 - `GET /v1/users/me/feed` (requires `Authorization: Bearer <token>`)
+- Ranked using explicit preferences + Spotify signals when available.
+
+## Auth + Preferences (Implemented)
+- `POST /auth/signup`
+- `POST /auth/login`
 - `GET /auth/preferences`
 - `POST /auth/preferences`
+
+Preference payload supports:
+- `preferred_genres`
+- `preferred_artists`
+
+## Spotify OAuth (Implemented)
+- `GET /auth/spotify/login` with `Authorization: Bearer <token>`
+- Browser-friendly: `GET /auth/spotify/login?token=<JWT>` (token is redacted in logs)
+- `GET /auth/spotify/callback`
 - `GET /auth/spotify/status`
 - `GET /auth/spotify/profile`
 - `POST /auth/spotify/sync`
-Preference payload supports:
-- `preferred_genres`, `preferred_artists`, `preferred_cities`, `preferred_venues`, `preferred_djs`
-- `budget_max`, `radius_km`, `night_preferences` (e.g. `weekday`, `weekend`)
 
-## Phase 3 API (Organizer Marketplace)
-- `POST /v1/organizer/plans`
-- `GET /v1/organizer/plans`
-- `GET /v1/organizer/plans/:id`
-- `PUT /v1/organizer/plans/:id`
-- `POST /v1/organizer/plans/:id/search/djs`
-- `POST /v1/organizer/plans/:id/search/venues`
-- `POST /v1/organizer/plans/:id/shortlist`
-- `GET /v1/organizer/plans/:id/shortlist`
-- `POST /v1/organizer/contact-requests`
-- `GET /v1/organizer/contact-requests`
-Organizer endpoints require a JWT with role `organizer` (set `role=organizer` on signup).
+Required env:
+- `SPOTIFY_CLIENT_ID`
+- `SPOTIFY_CLIENT_SECRET`
+- `SPOTIFY_REDIRECT_URI`
 
-## Ingestion (Phase 1)
-- Set `TICKETMASTER_API_KEY` and/or `EVENTBRITE_API_TOKEN`.
-- Enable XRaves ingestion with `XRAVES_ENABLED=true` (permission-based).
-- Set `INGESTION_ENABLED=true` to allow on-demand and scheduled ingestion.
-- Default schedule uses `INGESTION_DEFAULT_CITY` and runs every `INGESTION_STALE_HOURS`.
-- Manual run (inside `events-service`): `npm run ingest`
+Local redirect example:
+- `http://localhost:3001/auth/spotify/callback`
 
-## Spotify OAuth (Phase 2)
-- Set `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`.
-- Local dev redirect example: `http://localhost:3001/auth/spotify/callback`.
-- Production requires HTTPS redirect URIs (non-localhost) and a public domain/TLS termination.
-- Default scopes: `user-top-read user-read-email`.
+## Ingestion
+Sources supported:
+- Ticketmaster (Discovery API)
+- Eventbrite (token-based)
+- XRaves (scraper or direct fetch)
+- Local events
 
-## Deployment Notes (High-Level)
-- Ensure secrets are injected at runtime (do not commit `.env`).
-- Run DB migrations before rolling out new service versions.
-- Configure CORS origins via `CORS_ORIGIN` (comma-separated list) on the aggregator.
+Key env flags (see `.env.example`):
+- `INGESTION_ENABLED=true`
+- `INGESTION_DEFAULT_CITY` + `INGESTION_STALE_HOURS`
+- `TICKETMASTER_API_KEY` + `TICKETMASTER_COUNTRY_CODE`
+- `EVENTBRITE_API_TOKEN` + `EVENTBRITE_ORG_IDS`
+- `XRAVES_ENABLED`, `XRAVES_BASE_URL`, `XRAVES_SCRAPER_URL`
 
-## ECS Secrets (Task Definitions)
-Task definition JSON files now reference SSM Parameter Store paths:
-- `/whatsthecraic/prod/DB_PASSWORD`
-- `/whatsthecraic/prod/TICKETMASTER_API_KEY`
-- `/whatsthecraic/prod/EVENTBRITE_API_TOKEN`
-- `/whatsthecraic/prod/JWT_SECRET`
+Manual run (inside `events-service`):
+- `npm run ingest`
 
-Update these paths to match your environment or swap to Secrets Manager ARNs.
+## Database
+- MySQL is used for DJs, venues, users, and canonical events.
+- Local bootstrap: `init-gigsdb.sql`.
+- Migrations: `docs/migrations.md`.
 
-## Frontend
-- `gigfinder-app` is a React client.
-- Example env: `gigfinder-app/.env.example`
+## Deployment (Current)
+- Cheapest baseline is EC2 `t4g.micro` running Docker Compose.
+- See `docs/ops-runbook.md` for verification and recovery steps.
+- Secrets must be injected at runtime; do not commit `.env`.
+
+## Frontends
+Primary UI:
+- `gigfinder-app`
+- Start: `cd gigfinder-app && npm install && npm start`
+
+Legacy/alternate UI:
+- `gigfinder`
+- Start: `cd gigfinder && npm install && npm start`
+
+## Roadmap (Planned)
+- Improve ranking explainability + feedback loop.
+- Organizer marketplace (plans, shortlist, contact workflow).
+- Production hardening: CI, tests, observability, runbooks.
+- Optional infra upgrades: ECS Fargate + ALB + Aurora + S3 + SQS/SNS + DynamoDB + Route53 + Amplify.

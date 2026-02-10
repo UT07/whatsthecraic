@@ -79,48 +79,45 @@ const Venues = () => {
     }
   };
 
-  if (loading) return <p className="text-green-400">Loading Venues...</p>;
+  if (loading) {
+    return (
+      <div className="card max-w-md mx-auto text-center">
+        <p className="text-muted">Loading venues...</p>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl">Venues</h1>
-        <button 
-          onClick={() => openModal()} 
-          className="bg-green-500 px-4 py-2 rounded hover:bg-green-600"
-        >
-          Add Venue
-        </button>
+    <div className="space-y-6">
+      <div className="flex flex-wrap justify-between items-center gap-4">
+        <div>
+          <div className="badge mb-2">Marketplace</div>
+          <h1 className="section-title">Venue scouting</h1>
+          <p className="section-subtitle">Compare capacity, equipment, and fit per genre.</p>
+        </div>
+        <button onClick={() => openModal()} className="btn btn-primary">Add Venue</button>
       </div>
 
-      {/* Two-column responsive grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid-auto">
         {venues.map(venue => (
           <motion.div
             key={venue.id}
-            className="bg-gray-800 p-4 rounded transform transition-all duration-300 hover:scale-105 flex flex-col"
+            className="card flex flex-col gap-2"
           >
-            <h2 className="text-xl mb-2">{venue.name}</h2>
-            <p><strong>Address:</strong> {venue.address}</p>
-            <p><strong>Capacity:</strong> {venue.capacity}</p>
-            <p><strong>Genre Focus:</strong> {venue.genreFocus}</p>
-            <p><strong>Latitude:</strong> {venue.latitude}</p>
-            <p><strong>Longitude:</strong> {venue.longitude}</p>
-            <p><strong>Notes:</strong> {venue.notes}</p>
-
-            <div className="flex space-x-2 mt-2">
-              <button 
-                onClick={() => openModal(venue)}
-                className="bg-blue-500 px-3 py-1 rounded hover:bg-blue-600"
-              >
-                Edit
-              </button>
-              <button 
-                onClick={() => handleDeleteVenue(venue.id)}
-                className="bg-red-500 px-3 py-1 rounded hover:bg-red-600"
-              >
-                Delete
-              </button>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">{venue.name}</h2>
+              <span className="chip">{venue.capacity ? `${venue.capacity} cap` : 'Capacity TBA'}</span>
+            </div>
+            <p className="text-muted text-sm">{venue.address || 'Address pending'}</p>
+            <div className="grid gap-1 text-sm">
+              <span>Genre focus: {venue.genreFocus || '—'}</span>
+              <span>Latitude: {venue.latitude || '—'}</span>
+              <span>Longitude: {venue.longitude || '—'}</span>
+            </div>
+            <p className="text-muted text-sm">{venue.notes || 'No notes yet.'}</p>
+            <div className="flex gap-2 mt-3">
+              <button onClick={() => openModal(venue)} className="btn btn-outline">Edit</button>
+              <button onClick={() => handleDeleteVenue(venue.id)} className="btn btn-ghost">Delete</button>
             </div>
           </motion.div>
         ))}
@@ -129,40 +126,40 @@ const Venues = () => {
       {/* Modal for Add/Edit Venue */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-900 p-6 rounded w-11/12 max-w-md relative">
-            <h2 className="text-2xl mb-4">{editingVenue ? 'Edit Venue' : 'Add Venue'}</h2>
-            <form onSubmit={handleSubmit(onSubmit)}>
-              <div className="mb-4">
-                <label className="block mb-1">Name</label>
-                <input type="text" {...register("name", { required: true })} className="w-full p-2 rounded bg-gray-800" />
+          <div className="glass p-6 w-11/12 max-w-md relative">
+            <h2 className="section-title mb-4">{editingVenue ? 'Edit Venue' : 'Add Venue'}</h2>
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Name</label>
+                <input type="text" {...register("name", { required: true })} className="input" />
               </div>
-              <div className="mb-4">
-                <label className="block mb-1">Address</label>
-                <input type="text" {...register("address", { required: true })} className="w-full p-2 rounded bg-gray-800" />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Address</label>
+                <input type="text" {...register("address", { required: true })} className="input" />
               </div>
-              <div className="mb-4">
-                <label className="block mb-1">Capacity</label>
-                <input type="number" {...register("capacity")} className="w-full p-2 rounded bg-gray-800" />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Capacity</label>
+                <input type="number" {...register("capacity")} className="input" />
               </div>
-              <div className="mb-4">
-                <label className="block mb-1">Genre Focus</label>
-                <input type="text" {...register("genreFocus")} className="w-full p-2 rounded bg-gray-800" />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Genre Focus</label>
+                <input type="text" {...register("genreFocus")} className="input" />
               </div>
-              <div className="mb-4">
-                <label className="block mb-1">Latitude</label>
-                <input type="number" step="0.000001" {...register("latitude")} className="w-full p-2 rounded bg-gray-800" />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Latitude</label>
+                <input type="number" step="0.000001" {...register("latitude")} className="input" />
               </div>
-              <div className="mb-4">
-                <label className="block mb-1">Longitude</label>
-                <input type="number" step="0.000001" {...register("longitude")} className="w-full p-2 rounded bg-gray-800" />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Longitude</label>
+                <input type="number" step="0.000001" {...register("longitude")} className="input" />
               </div>
-              <div className="mb-4">
-                <label className="block mb-1">Notes</label>
-                <textarea {...register("notes")} className="w-full p-2 rounded bg-gray-800" rows="3" />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Notes</label>
+                <textarea {...register("notes")} className="input" rows="3" />
               </div>
-              <div className="flex justify-end space-x-2">
-                <button type="button" onClick={closeModal} className="bg-gray-500 px-4 py-2 rounded hover:bg-gray-600">Cancel</button>
-                <button type="submit" className="bg-green-500 px-4 py-2 rounded hover:bg-green-600">{editingVenue ? 'Update' : 'Add'}</button>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={closeModal} className="btn btn-outline">Cancel</button>
+                <button type="submit" className="btn btn-primary">{editingVenue ? 'Update' : 'Add'}</button>
               </div>
             </form>
           </div>

@@ -16,6 +16,7 @@ const EVENTBRITE_ORG_IDS = process.env.EVENTBRITE_ORG_IDS
 const XRAVES_ENABLED = (process.env.XRAVES_ENABLED || 'false') === 'true';
 const XRAVES_BASE_URL = process.env.XRAVES_BASE_URL || 'https://xraves.ie/';
 const XRAVES_USER_AGENT = process.env.XRAVES_USER_AGENT || 'WhatsTheCraicIngestionBot/1.0';
+const XRAVES_SCRAPER_URL = process.env.XRAVES_SCRAPER_URL || null;
 const INGESTION_MAX_PAGES = Number.parseInt(process.env.INGESTION_MAX_PAGES || '5', 10);
 
 const city = process.env.INGESTION_DEFAULT_CITY || 'Dublin';
@@ -57,6 +58,7 @@ const end = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
       endDate: end,
       baseUrl: XRAVES_BASE_URL,
       userAgent: XRAVES_USER_AGENT,
+      scraperUrl: XRAVES_SCRAPER_URL,
       enabled: XRAVES_ENABLED
     }));
 

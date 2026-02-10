@@ -71,51 +71,50 @@ const DJs = () => {
   };
 
   if (loading) {
-    return <p className="text-green-400">Loading DJs...</p>;
+    return (
+      <div className="card max-w-md mx-auto text-center">
+        <p className="text-muted">Loading DJs...</p>
+      </div>
+    );
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl">DJs</h1>
-        <button 
-          onClick={() => openModal()} 
-          className="bg-green-500 px-4 py-2 rounded hover:bg-green-600"
-        >
+    <div className="space-y-6">
+      <div className="flex flex-wrap justify-between items-center gap-4">
+        <div>
+          <div className="badge mb-2">Marketplace</div>
+          <h1 className="section-title">DJ roster</h1>
+          <p className="section-subtitle">Shortlist talent, compare fees, and reach out in minutes.</p>
+        </div>
+        <button onClick={() => openModal()} className="btn btn-primary">
           Add DJ
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid-auto">
         {djs.map(dj => (
           <motion.div
             key={dj.dj_id}
-            className="bg-gray-800 p-4 rounded transform transition-all duration-300 hover:scale-105 flex flex-col"
+            className="card flex flex-col gap-2"
           >
-            <h2 className="text-xl mb-2">{dj.dj_name}</h2>
-            <p><strong>Email:</strong> {dj.email}</p>
-            <p><strong>Genres:</strong> {dj.genres}</p>
-            <p><strong>Instagram:</strong> {dj.instagram}</p>
-            <p><strong>SoundCloud:</strong> {dj.soundcloud}</p>
-            <p><strong>City:</strong> {dj.city}</p>
-            <p><strong>Phone:</strong> {dj.phone}</p>
-            <p><strong>Original Currency:</strong> {dj.currency}</p>
-            <p><strong>DJ Fee:</strong> {dj.numeric_fee}</p>
-            <p><strong>Fee in EUR:</strong> €{dj.fee_eur}</p>
-
-            <div className="flex space-x-2 mt-2">
-              <button 
-                onClick={() => openModal(dj)}
-                className="bg-blue-500 px-3 py-1 rounded hover:bg-blue-600"
-              >
-                Edit
-              </button>
-              <button 
-                onClick={() => handleDeleteDJ(dj.dj_id)}
-                className="bg-red-500 px-3 py-1 rounded hover:bg-red-600"
-              >
-                Delete
-              </button>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">{dj.dj_name}</h2>
+              <span className="chip">{dj.city || 'City TBA'}</span>
+            </div>
+            <p className="text-muted text-sm">{dj.genres || 'Genres pending'}</p>
+            <div className="grid gap-1 text-sm">
+              <span>Email: {dj.email}</span>
+              <span>Instagram: {dj.instagram || '—'}</span>
+              <span>SoundCloud: {dj.soundcloud || '—'}</span>
+              <span>Phone: {dj.phone || '—'}</span>
+            </div>
+            <div className="flex items-center gap-3 mt-2">
+              <span className="badge">Fee {dj.currency || 'EUR'} {dj.numeric_fee || 'TBD'}</span>
+              <span className="chip">EUR {dj.fee_eur || 'TBD'}</span>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button onClick={() => openModal(dj)} className="btn btn-outline">Edit</button>
+              <button onClick={() => handleDeleteDJ(dj.dj_id)} className="btn btn-ghost">Delete</button>
             </div>
           </motion.div>
         ))}
@@ -123,78 +122,40 @@ const DJs = () => {
 
       {modalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-900 p-6 rounded w-11/12 max-w-md relative">
-            <h2 className="text-2xl mb-4">{editingDJ ? 'Edit DJ' : 'Add DJ'}</h2>
-            <form onSubmit={handleSubmit(onSubmit)}>
-              <div className="mb-4">
-                <label className="block mb-1">Name</label>
-                <input 
-                  type="text" 
-                  {...register("dj_name", { required: true })} 
-                  className="w-full p-2 rounded bg-gray-800" 
-                />
+          <div className="glass p-6 w-11/12 max-w-md relative">
+            <h2 className="section-title mb-4">{editingDJ ? 'Edit DJ' : 'Add DJ'}</h2>
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Name</label>
+                <input type="text" {...register("dj_name", { required: true })} className="input" />
               </div>
-
-              <div className="mb-4">
-                <label className="block mb-1">Email</label>
-                <input 
-                  type="email" 
-                  {...register("email", { required: true })} 
-                  className="w-full p-2 rounded bg-gray-800" 
-                />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Email</label>
+                <input type="email" {...register("email", { required: true })} className="input" />
               </div>
-
-              <div className="mb-4">
-                <label className="block mb-1">Instagram</label>
-                <input 
-                  type="text" 
-                  {...register("instagram")} 
-                  className="w-full p-2 rounded bg-gray-800" 
-                />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Instagram</label>
+                <input type="text" {...register("instagram")} className="input" />
               </div>
-
-              <div className="mb-4">
-                <label className="block mb-1">Genres</label>
-                <input 
-                  type="text" 
-                  {...register("genres")} 
-                  className="w-full p-2 rounded bg-gray-800" 
-                />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Genres</label>
+                <input type="text" {...register("genres")} className="input" />
               </div>
-
-              <div className="mb-4">
-                <label className="block mb-1">SoundCloud</label>
-                <textarea 
-                  {...register("soundcloud")} 
-                  className="w-full p-2 rounded bg-gray-800" 
-                  rows="2" 
-                />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">SoundCloud</label>
+                <textarea {...register("soundcloud")} className="input" rows="2" />
               </div>
-
-              <div className="mb-4">
-                <label className="block mb-1">City</label>
-                <input 
-                  type="text" 
-                  {...register("city")} 
-                  className="w-full p-2 rounded bg-gray-800" 
-                />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">City</label>
+                <input type="text" {...register("city")} className="input" />
               </div>
-
-              <div className="mb-4">
-                <label className="block mb-1">Phone</label>
-                <input 
-                  type="text" 
-                  {...register("phone")} 
-                  className="w-full p-2 rounded bg-gray-800" 
-                />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Phone</label>
+                <input type="text" {...register("phone")} className="input" />
               </div>
-
-              <div className="mb-4">
-                <label className="block mb-1">Currency</label>
-                <select 
-                  {...register("currency")} 
-                  className="w-full p-2 rounded bg-gray-800"
-                >
+              <div>
+                <label className="block mb-1 text-sm font-semibold">Currency</label>
+                <select {...register("currency")} className="input">
                   <option value="EUR">EUR</option>
                   <option value="USD">USD</option>
                   <option value="INR">INR</option>
@@ -202,31 +163,13 @@ const DJs = () => {
                   <option value="CNY">CNY</option>
                 </select>
               </div>
-
-              <div className="mb-4">
-                <label className="block mb-1">DJ Fee</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  {...register("numeric_fee")} 
-                  className="w-full p-2 rounded bg-gray-800" 
-                />
+              <div>
+                <label className="block mb-1 text-sm font-semibold">DJ Fee</label>
+                <input type="number" step="0.01" {...register("numeric_fee")} className="input" />
               </div>
-
-              <div className="flex justify-end space-x-2">
-                <button 
-                  type="button" 
-                  onClick={closeModal} 
-                  className="bg-gray-500 px-4 py-2 rounded hover:bg-gray-600"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit" 
-                  className="bg-green-500 px-4 py-2 rounded hover:bg-green-600"
-                >
-                  {editingDJ ? 'Update' : 'Add'}
-                </button>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={closeModal} className="btn btn-outline">Cancel</button>
+                <button type="submit" className="btn btn-primary">{editingDJ ? 'Update' : 'Add'}</button>
               </div>
             </form>
           </div>

@@ -1,0 +1,14 @@
+{
+  "name": "xraves-scraper",
+  "version": "1.0.0",
+  "description": "Playwright-based scraper for XRaves events",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "playwright-core": "1.41.2"
+  }
+}

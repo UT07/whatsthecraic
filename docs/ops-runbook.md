@@ -57,7 +57,9 @@ Checklist:
    If Eventbrite returns `404` on search, it may require org-scoped ingestion:
    - Set `EVENTBRITE_ORG_IDS=<comma-separated org ids>` or let the service fetch your orgs.
    If XRaves returns `403`, set a browser-like `XRAVES_USER_AGENT` and restart `events-service`.
-   If XRaves still returns `403`, Cloudflare may be blocking the EC2 IP. Allowlist the server IP or use a proxy via `XRAVES_BASE_URL`.
+   If XRaves still returns `403`, enable the Playwright scraper (`xraves-scraper`) and set
+   `XRAVES_SCRAPER_URL=http://xraves-scraper:4010` so ingestion pulls `__NEXT_DATA__` via a real browser.
+   Cloudflare may be blocking the EC2 IP; allowlist the server IP or run the scraper on a separate host.
 5. Validate ingestion state in DB:
    `docker exec gigsdb sh -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SELECT source, city, last_synced_at FROM ingest_state ORDER BY last_synced_at DESC LIMIT 10" gigsdb'`
 6. Validate dedupe/normalize:

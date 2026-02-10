@@ -1,302 +1,233 @@
-// src/pages/CombinedGigs.jsx
-import React, { useState, useEffect } from 'react';
-import eventsAPI from '../services/eventsAPI';
-import aggregatorAPI from '../services/aggregatorAPI';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { useForm } from 'react-hook-form';
+import eventsAPI from '../services/eventsAPI';
+import { getToken } from '../services/apiClient';
 
-// Helper: Convert local event fields to a unified structure
-function unifyLocalEvents(localData = []) {
-  return localData.map(evt => ({
-    // Transform local properties to aggregator-like fields
-    eventName: evt.event_name || evt.eventName,
-    venue: evt.venue_name || evt.venue,
-    date: evt.date_local || evt.date,
-    time: evt.time_local || evt.time,
-    address: evt.address || 'N/A',
-    // For local events, ticketLink might be missing.
-    // If missing, ticketLink will be null.
-    ticketLink: evt.ticket_link || evt.ticketLink || null,
-    source: evt.source || 'Local',
-    id: evt.id,
-  }));
-}
+const formatDate = (iso) => {
+  if (!iso) return 'TBA';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'TBA';
+  return date.toLocaleString('en-IE', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
 
 const CombinedGigs = () => {
   const [events, setEvents] = useState([]);
-  const [searchResults, setSearchResults] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState(null);
+  const [mode, setMode] = useState('feed');
+  const [savedIds, setSavedIds] = useState(new Set());
+  const token = getToken();
 
-  // Filters are used only for aggregator searches
   const [filters, setFilters] = useState({
     city: '',
-    genre: '',
-    djName: '',
-    venue: ''
+    from: '',
+    to: '',
+    genres: '',
+    priceMax: '',
+    source: ''
   });
 
-  const { register, handleSubmit, reset } = useForm();
+  const activeFilters = useMemo(() => {
+    const clean = {};
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) clean[key] = value;
+    });
+    return clean;
+  }, [filters]);
 
-  const fetchEvents = () => {
-    eventsAPI.getAllEvents()
-      .then((data) => {
-        console.log("Fetched events (raw):", data);
-        const unifiedLocal = unifyLocalEvents(data);
-        console.log("Unified local events:", unifiedLocal);
-        setEvents(unifiedLocal);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("Error fetching events:", error);
-        setLoading(false);
-      });
+  const loadFeed = async () => {
+    setLoading(true);
+    try {
+      const data = await eventsAPI.getFeed(activeFilters);
+      setEvents(data.events || []);
+    } catch (error) {
+      console.error('Feed error:', error);
+      setEvents([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runSearch = async () => {
+    setLoading(true);
+    try {
+      const data = await eventsAPI.searchEvents(activeFilters);
+      setEvents(data.events || []);
+    } catch (error) {
+      console.error('Search error:', error);
+      setEvents([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchEvents();
-  }, []);
+    if (mode === 'feed') {
+      loadFeed();
+    }
+  }, [mode]);
 
-  const openModal = (event = null) => {
-    setEditingEvent(event);
-    reset(event || {});
-    setModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setEditingEvent(null);
-    setModalOpen(false);
-  };
-
-  const onSubmit = (formData) => {
-    if (editingEvent) {
-      eventsAPI.updateEvent(editingEvent.id, formData)
-        .then(() => {
-          alert("Event updated successfully");
-          fetchEvents();
-          setSearchResults(null);
-          closeModal();
-        })
-        .catch(error => {
-          console.error("Error updating event:", error);
-          alert("Failed to update event");
-        });
-    } else {
-      eventsAPI.addEvent(formData)
-        .then(() => {
-          alert("Event added successfully");
-          fetchEvents();
-          setSearchResults(null);
-          closeModal();
-        })
-        .catch(error => {
-          console.error("Error adding event:", error);
-          alert("Failed to add event");
-        });
+  const handleSave = async (id) => {
+    try {
+      await eventsAPI.saveEvent(id);
+      setSavedIds(prev => new Set([...prev, id]));
+    } catch (error) {
+      console.error('Save failed:', error);
     }
   };
-
-  const handleDeleteEvent = (eventId) => {
-    if (window.confirm("Are you sure you want to delete this event?")) {
-      eventsAPI.deleteEvent(eventId)
-        .then(() => {
-          alert("Event deleted successfully");
-          fetchEvents();
-          setSearchResults(null);
-        })
-        .catch((error) => {
-          console.error("Error deleting event:", error);
-          alert("Failed to delete event");
-        });
-    }
-  };
-
-  const handleSearch = () => {
-    setLoading(true);
-    aggregatorAPI.searchEvents(filters)
-      .then((responseData) => {
-        console.log("Search results (raw):", responseData);
-        let results = [];
-        if (Array.isArray(responseData)) {
-          results = responseData;
-        } else if (responseData && Array.isArray(responseData.data)) {
-          results = responseData.data;
-        } else if (responseData && typeof responseData === 'object') {
-          results = Object.values(responseData).flat();
-        } else {
-          console.error("Unexpected search response structure:", responseData);
-        }
-        console.log("Aggregator results:", results);
-        setSearchResults(results);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("Error searching events:", error);
-        setLoading(false);
-      });
-  };
-
-  // Display aggregator results if available; otherwise show local events
-  const eventsToDisplay = searchResults !== null ? searchResults : events;
 
   return (
-    <div>
-      <div className="mb-4">
-        <h1 className="text-2xl mb-4">Events</h1>
-        <div className="grid grid-cols-2 gap-4 mb-4">
+    <div className="space-y-8">
+      <section className="card">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="badge mb-2">Discover</div>
+            <h1 className="section-title">Your next night out</h1>
+            <p className="section-subtitle">
+              Personalize with Spotify, or run a targeted search across Dublin and beyond.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              className={`btn ${mode === 'feed' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setMode('feed')}
+              disabled={!token}
+            >
+              For You
+            </button>
+            <button
+              className={`btn ${mode === 'search' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setMode('search')}
+            >
+              Search
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
           <input
-            type="text"
-            placeholder="City"
-            className="p-2 rounded bg-gray-800"
+            className="input"
+            placeholder="City (ex: Dublin)"
             value={filters.city}
             onChange={(e) => setFilters({ ...filters, city: e.target.value })}
           />
           <input
-            type="text"
-            placeholder="Genre"
-            className="p-2 rounded bg-gray-800"
-            value={filters.genre}
-            onChange={(e) => setFilters({ ...filters, genre: e.target.value })}
+            className="input"
+            placeholder="Genres (comma separated)"
+            value={filters.genres}
+            onChange={(e) => setFilters({ ...filters, genres: e.target.value })}
+          />
+          <select
+            className="input"
+            value={filters.source}
+            onChange={(e) => setFilters({ ...filters, source: e.target.value })}
+          >
+            <option value="">All sources</option>
+            <option value="ticketmaster">Ticketmaster</option>
+            <option value="eventbrite">Eventbrite</option>
+            <option value="xraves">XRaves</option>
+            <option value="local">Manual</option>
+          </select>
+          <input
+            className="input"
+            type="date"
+            value={filters.from}
+            onChange={(e) => setFilters({ ...filters, from: e.target.value })}
           />
           <input
-            type="text"
-            placeholder="DJ Name"
-            className="p-2 rounded bg-gray-800"
-            value={filters.djName}
-            onChange={(e) => setFilters({ ...filters, djName: e.target.value })}
+            className="input"
+            type="date"
+            value={filters.to}
+            onChange={(e) => setFilters({ ...filters, to: e.target.value })}
           />
           <input
-            type="text"
-            placeholder="Venue Name"
-            className="p-2 rounded bg-gray-800"
-            value={filters.venue}
-            onChange={(e) => setFilters({ ...filters, venue: e.target.value })}
+            className="input"
+            type="number"
+            placeholder="Max price (EUR)"
+            value={filters.priceMax}
+            onChange={(e) => setFilters({ ...filters, priceMax: e.target.value })}
           />
         </div>
-        <div className="flex space-x-4 mb-4">
-          <button 
-            onClick={handleSearch} 
-            className="bg-green-500 px-4 py-2 rounded hover:bg-green-600"
-          >
-            Search
-          </button>
-          <button 
-            onClick={() => openModal()} 
-            className="bg-green-500 px-4 py-2 rounded hover:bg-green-600"
-          >
-            Add Event
-          </button>
-        </div>
-        {searchResults !== null && (
-          <p className="text-yellow-300 mb-2">
-            Showing search results ({eventsToDisplay.length} found).
-          </p>
-        )}
-      </div>
 
-      {loading ? (
-        <p className="text-green-400">Loading events...</p>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {eventsToDisplay.length === 0 ? (
-            <p className="text-red-400">No events found.</p>
-          ) : (
-            eventsToDisplay.map((event, index) => {
-              // For local events (source "Local"), we show the button always;
-              // For others, we show it only if event.ticketLink exists.
-              const showTicketButton = event.source === "Local" || event.ticketLink;
-              // Set card background: Local events get gray, others neon green.
-              const cardClasses = `p-4 rounded flex flex-col transform transition-all duration-300 hover:scale-105 ${
-                event.source === "Local" ? "bg-gray-800" : "bg-[#39FF14]"
-              }`;
-              return (
-                <motion.div key={event.id || index} className={cardClasses}>
-                  <h2 className="text-xl mb-2">{event.eventName}</h2>
-                  <p><strong>Venue:</strong> {event.venue}</p>
-                  <p><strong>Date:</strong> {event.date} {event.time}</p>
-                  <p><strong>Address:</strong> {event.address}</p>
-                  <div className="flex space-x-2 mt-2">
-                    <button 
-                      onClick={() => openModal(event)}
-                      className="bg-blue-500 px-3 py-1 rounded hover:bg-blue-600"
-                    >
-                      Edit
-                    </button>
-                    <button 
-                      onClick={() => handleDeleteEvent(event.id)}
-                      className="bg-red-500 px-3 py-1 rounded hover:bg-red-600"
-                    >
-                      Delete
-                    </button>
-                    {showTicketButton && (
-                      <a
-                        href={event.ticketLink ? event.ticketLink : "#"}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`bg-purple-500 px-3 py-1 rounded ${
-                          event.ticketLink ? "hover:bg-purple-600" : "opacity-50 cursor-not-allowed"
-                        }`}
-                      >
-                        Buy Tickets
-                      </a>
-                    )}
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button className="btn btn-primary" onClick={mode === 'feed' ? loadFeed : runSearch}>
+            {mode === 'feed' ? 'Refresh Feed' : 'Run Search'}
+          </button>
+          <button
+            className="btn btn-outline"
+            onClick={() => setFilters({ city: '', from: '', to: '', genres: '', priceMax: '', source: '' })}
+          >
+            Clear filters
+          </button>
+          {!token && <span className="chip">Login to unlock "For You"</span>}
+        </div>
+      </section>
+
+      <section className="grid-auto">
+        {loading ? (
+          <div className="card text-center text-muted">Loading events…</div>
+        ) : events.length === 0 ? (
+          <div className="card text-center text-muted">No events found for these filters.</div>
+        ) : (
+          events.map((event, index) => {
+            const image = event.images?.[0]?.url;
+            const saved = savedIds.has(event.id);
+            return (
+              <motion.article
+                key={`${event.id}-${index}`}
+                className="card flex flex-col gap-4"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, delay: index * 0.03 }}
+              >
+                {image && (
+                  <div
+                    className="w-full h-40 rounded-xl bg-cover bg-center"
+                    style={{ backgroundImage: `url(${image})` }}
+                  />
+                )}
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-lg font-semibold">{event.title}</h2>
+                    <p className="text-muted text-sm">{event.venue_name || 'Venue TBA'}</p>
                   </div>
-                </motion.div>
-              );
-            })
-          )}
-        </div>
-      )}
-
-      {/* Modal for Add/Edit Event */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-900 p-6 rounded w-11/12 max-w-md relative">
-            <h2 className="text-2xl mb-4">{editingEvent ? 'Edit Event' : 'Add Event'}</h2>
-            <form onSubmit={handleSubmit(onSubmit)}>
-              <input 
-                type="text" 
-                {...register("eventName", { required: true })} 
-                placeholder="Event Name" 
-                className="w-full p-2 mb-2 rounded bg-gray-800" 
-              />
-              <input 
-                type="date" 
-                {...register("date")} 
-                className="w-full p-2 mb-2 rounded bg-gray-800" 
-              />
-              <input 
-                type="time" 
-                {...register("time")} 
-                className="w-full p-2 mb-2 rounded bg-gray-800" 
-              />
-              <input 
-                type="text" 
-                {...register("venue")} 
-                placeholder="Venue Name" 
-                className="w-full p-2 mb-2 rounded bg-gray-800" 
-              />
-              <input 
-                type="text" 
-                {...register("address")} 
-                placeholder="Address" 
-                className="w-full p-2 mb-2 rounded bg-gray-800" 
-              />
-              {/* Field for ticket link */}
-              <input 
-                type="text" 
-                {...register("ticketLink")} 
-                placeholder="Ticket Link (optional)" 
-                className="w-full p-2 mb-2 rounded bg-gray-800" 
-              />
-              <button type="submit" className="bg-green-500 px-4 py-2 rounded hover:bg-green-600">
-                {editingEvent ? 'Update' : 'Add'}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
+                  <span className="chip">{event.city || 'Ireland'}</span>
+                </div>
+                <div className="text-sm text-muted">{formatDate(event.start_time)}</div>
+                <div className="flex flex-wrap gap-2">
+                  {(event.genres || []).slice(0, 3).map((genre) => (
+                    <span key={genre} className="chip">{genre}</span>
+                  ))}
+                  {(event.tags || []).slice(0, 2).map((tag) => (
+                    <span key={tag} className="chip">{tag}</span>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-3 mt-auto">
+                  {event.ticket_url && (
+                    <a className="btn btn-outline" href={event.ticket_url} target="_blank" rel="noreferrer">
+                      Tickets
+                    </a>
+                  )}
+                  <button
+                    className={`btn ${saved ? 'btn-outline' : 'btn-primary'}`}
+                    onClick={() => handleSave(event.id)}
+                  >
+                    {saved ? 'Saved' : 'Save'}
+                  </button>
+                </div>
+                <div className="text-xs text-muted">
+                  Sources: {(event.sources || []).map(source => source.source).join(', ') || 'local'}
+                </div>
+              </motion.article>
+            );
+          })
+        )}
+      </section>
     </div>
   );
 };

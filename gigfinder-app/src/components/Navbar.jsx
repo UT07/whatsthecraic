@@ -1,39 +1,49 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { getToken, setToken, setUser, getUser } from '../services/apiClient';
 
 const Navbar = ({ setIsAuthenticated }) => {
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    localStorage.removeItem('dummyToken');
+    setToken(null);
+    setUser(null);
     setIsAuthenticated(false);
     navigate('/auth/login');
   };
 
-  const isAuthenticated = localStorage.getItem('dummyToken') ? true : false;
+  const isAuthenticated = Boolean(getToken());
+  const user = getUser();
 
   return (
-    <nav className="bg-gray-900 p-4 flex justify-between items-center">
-      <div className="flex space-x-4">
-        <span className="text-green-400 font-bold text-xl mr-6">WhatstheCraic</span>
-        {isAuthenticated && (
-          <>
-            <Link to="/dashboard" className="hover:text-green-300">Dashboard</Link>
-            <Link to="/djs" className="hover:text-green-300">DJs</Link>
-            <Link to="/venues" className="hover:text-green-300">Venues</Link>
-            <Link to="/discover" className="hover:text-green-300">Discover</Link>
-          </>
-        )}
-      </div>
-      <div className="flex items-center space-x-4">
-        {isAuthenticated ? (
-          <button onClick={handleLogout} className="hover:text-green-300">Logout</button>
-        ) : (
-          <>
-            <Link to="/auth/login" className="hover:text-green-300">Login</Link>
-            <Link to="/auth/signup" className="hover:text-green-300">Signup</Link>
-          </>
-        )}
+    <nav className="nav-shell">
+      <div className="nav-inner">
+        <div className="flex items-center gap-8">
+          <Link to={isAuthenticated ? '/dashboard' : '/auth/login'} className="brand">
+            WhatsTheCraic
+          </Link>
+          {isAuthenticated && (
+            <div className="nav-links">
+              <Link to="/dashboard" className="nav-link">Overview</Link>
+              <Link to="/discover" className="nav-link">Discover</Link>
+              <Link to="/djs" className="nav-link">DJs</Link>
+              <Link to="/venues" className="nav-link">Venues</Link>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {isAuthenticated ? (
+            <>
+              <span className="chip">{user?.name || 'Member'}</span>
+              <button onClick={handleLogout} className="btn btn-outline">Logout</button>
+            </>
+          ) : (
+            <>
+              <Link to="/auth/login" className="btn btn-ghost">Login</Link>
+              <Link to="/auth/signup" className="btn btn-primary">Create Account</Link>
+            </>
+          )}
+        </div>
       </div>
     </nav>
   );
