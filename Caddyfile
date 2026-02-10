@@ -1,0 +1,7 @@
+whatsthecraic.run.place, www.whatsthecraic.run.place, api.whatsthecraic.run.place {
+  reverse_proxy aggregator:4000
+}
+
+auth.whatsthecraic.run.place {
+  reverse_proxy auth-service:3001
+}

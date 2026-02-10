@@ -5,6 +5,7 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const crypto = require('crypto');
 const { z } = require('zod');
+const rateLimit = require('express-rate-limit');
 
 
 const DB_HOST = process.env.DB_HOST || 'db';
@@ -34,6 +35,13 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+const metrics = {
+  startTime: Date.now(),
+  requests: 0,
+  statusCodes: {},
+  totalDurationMs: 0
+};
+
 app.use((req, res, next) => {
   const requestId = crypto.randomUUID();
   req.requestId = requestId;
@@ -41,9 +49,43 @@ app.use((req, res, next) => {
   const started = Date.now();
   res.on('finish', () => {
     const durationMs = Date.now() - started;
+    metrics.requests += 1;
+    metrics.totalDurationMs += durationMs;
+    metrics.statusCodes[res.statusCode] = (metrics.statusCodes[res.statusCode] || 0) + 1;
     console.log(`[${requestId}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
   });
   next();
+});
+
+const parseIntOrDefault = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
+const rateLimiter = rateLimit({
+  windowMs: parseIntOrDefault(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
+  max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 120),
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use(rateLimiter);
+
+app.get('/metrics', (req, res) => {
+  const uptimeSeconds = Math.floor((Date.now() - metrics.startTime) / 1000);
+  const avgDuration = metrics.requests > 0
+    ? Number((metrics.totalDurationMs / metrics.requests).toFixed(2))
+    : 0;
+  res.json({
+    uptime_seconds: uptimeSeconds,
+    requests_total: metrics.requests,
+    status_codes: metrics.statusCodes,
+    avg_duration_ms: avgDuration
+  });
 });
 
 const sendError = (res, status, code, message, details) => {
@@ -70,7 +112,7 @@ app.get('/venues', async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('Error fetching venues:', err);
-    res.status(500).json({ error: 'Failed to fetch venues' });
+    return sendError(res, 500, 'internal_error', 'Failed to fetch venues');
   }
 });
 

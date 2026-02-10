@@ -65,9 +65,58 @@ CREATE TABLE `users` (
   `name` varchar(255) NOT NULL,
   `email` varchar(255) NOT NULL,
   `password_hash` varchar(255) NOT NULL,
+  `role` varchar(32) DEFAULT 'user',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `users_email_unique` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `user_preferences`
+--
+
+DROP TABLE IF EXISTS `user_preferences`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `user_preferences` (
+  `user_id` int NOT NULL,
+  `preferred_genres` json DEFAULT NULL,
+  `preferred_artists` json DEFAULT NULL,
+  `preferred_cities` json DEFAULT NULL,
+  `preferred_venues` json DEFAULT NULL,
+  `preferred_djs` json DEFAULT NULL,
+  `budget_max` decimal(10,2) DEFAULT NULL,
+  `radius_km` int DEFAULT NULL,
+  `night_preferences` json DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`user_id`),
+  CONSTRAINT `fk_user_preferences_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `user_spotify`
+--
+
+DROP TABLE IF EXISTS `user_spotify`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `user_spotify` (
+  `user_id` int NOT NULL,
+  `spotify_user_id` varchar(128) NOT NULL,
+  `access_token` text NOT NULL,
+  `refresh_token` text,
+  `token_type` varchar(32) DEFAULT 'Bearer',
+  `scope` varchar(255) DEFAULT NULL,
+  `expires_at` datetime NOT NULL,
+  `top_artists` json DEFAULT NULL,
+  `top_genres` json DEFAULT NULL,
+  `last_synced_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`user_id`),
+  UNIQUE KEY `user_spotify_spotify_user_id_unique` (`spotify_user_id`),
+  CONSTRAINT `fk_user_spotify_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -158,6 +207,78 @@ CREATE TABLE `user_saved_events` (
   PRIMARY KEY (`user_id`, `event_id`),
   CONSTRAINT `fk_saved_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_saved_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for organizer event plans
+--
+
+DROP TABLE IF EXISTS `event_plans`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `event_plans` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `city` varchar(100) DEFAULT NULL,
+  `start_date` datetime DEFAULT NULL,
+  `end_date` datetime DEFAULT NULL,
+  `capacity` int DEFAULT NULL,
+  `budget_min` decimal(10,2) DEFAULT NULL,
+  `budget_max` decimal(10,2) DEFAULT NULL,
+  `genres` json DEFAULT NULL,
+  `gear_needs` json DEFAULT NULL,
+  `vibe_tags` json DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `event_plans_user_idx` (`user_id`),
+  CONSTRAINT `fk_event_plans_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for organizer shortlists
+--
+
+DROP TABLE IF EXISTS `event_plan_shortlists`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `event_plan_shortlists` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `plan_id` int NOT NULL,
+  `item_type` varchar(16) NOT NULL,
+  `item_id` int NOT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `event_plan_shortlists_unique` (`plan_id`,`item_type`,`item_id`),
+  CONSTRAINT `fk_event_plan_shortlists_plan` FOREIGN KEY (`plan_id`) REFERENCES `event_plans` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for contact requests
+--
+
+DROP TABLE IF EXISTS `contact_requests`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `contact_requests` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `plan_id` int DEFAULT NULL,
+  `item_type` varchar(16) NOT NULL,
+  `item_id` int NOT NULL,
+  `message` text NOT NULL,
+  `status` varchar(32) DEFAULT 'pending',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `contact_requests_user_idx` (`user_id`),
+  KEY `contact_requests_plan_idx` (`plan_id`),
+  CONSTRAINT `fk_contact_requests_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_contact_requests_plan` FOREIGN KEY (`plan_id`) REFERENCES `event_plans` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 

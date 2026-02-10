@@ -3,7 +3,9 @@
     "executionRoleArn": "arn:aws:iam::395338916491:role/ecsTaskExecutionRole",
     "taskRoleArn": "arn:aws:iam::395338916491:role/ecsTaskExecutionRole",
     "networkMode": "awsvpc",
-    "requiresCompatibilities": ["FARGATE"],
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
     "cpu": "512",
     "memory": "1024",
     "containerDefinitions": [
@@ -19,14 +21,34 @@
             ],
             "essential": true,
             "environment": [
-                {"name": "DB_HOST", "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"},
-                {"name": "DB_PORT", "value": "3306"},
-                {"name": "DB_USER", "value": "admin"},
-                {"name": "DB_PASSWORD", "value": "whatsthecraic123"},
-                {"name": "DB_NAME", "value": "gigsdb"},
-                {"name": "VENUE_SERVICE_URL", "value": "http://venue-service.whatsthecraic.local:4001"},
-                {"name": "DJ_SERVICE_URL", "value": "http://dj-service.whatsthecraic.local:4002"},
-                {"name": "LOCAL_EVENTS_URL", "value": "http://events-service.whatsthecraic.local:4003"}
+                {
+                    "name": "DB_HOST",
+                    "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"
+                },
+                {
+                    "name": "DB_PORT",
+                    "value": "3306"
+                },
+                {
+                    "name": "DB_USER",
+                    "value": "admin"
+                },
+                {
+                    "name": "DB_NAME",
+                    "value": "gigsdb"
+                },
+                {
+                    "name": "VENUE_SERVICE_URL",
+                    "value": "http://venue-service.whatsthecraic.local:4001"
+                },
+                {
+                    "name": "DJ_SERVICE_URL",
+                    "value": "http://dj-service.whatsthecraic.local:4002"
+                },
+                {
+                    "name": "LOCAL_EVENTS_URL",
+                    "value": "http://events-service.whatsthecraic.local:4003"
+                }
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -35,7 +57,17 @@
                     "awslogs-region": "eu-west-1",
                     "awslogs-stream-prefix": "ecs"
                 }
-            }
+            },
+            "secrets": [
+                {
+                    "name": "DB_PASSWORD",
+                    "valueFrom": "/whatsthecraic/prod/DB_PASSWORD"
+                },
+                {
+                    "name": "TICKETMASTER_API_KEY",
+                    "valueFrom": "/whatsthecraic/prod/TICKETMASTER_API_KEY"
+                }
+            ]
         }
     ]
 }

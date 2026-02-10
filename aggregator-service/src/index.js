@@ -3,6 +3,7 @@ const axios = require('axios');
 const cors = require('cors');
 const crypto = require('crypto');
 const { z } = require('zod');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 app.use(express.json());
@@ -16,6 +17,13 @@ app.use(cors({
   credentials: false
 }));
 
+const metrics = {
+  startTime: Date.now(),
+  requests: 0,
+  statusCodes: {},
+  totalDurationMs: 0
+};
+
 app.use((req, res, next) => {
   const requestId = crypto.randomUUID();
   req.requestId = requestId;
@@ -23,10 +31,31 @@ app.use((req, res, next) => {
   const started = Date.now();
   res.on('finish', () => {
     const durationMs = Date.now() - started;
+    metrics.requests += 1;
+    metrics.totalDurationMs += durationMs;
+    metrics.statusCodes[res.statusCode] = (metrics.statusCodes[res.statusCode] || 0) + 1;
     console.log(`[${requestId}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
   });
   next();
 });
+
+const parseIntOrDefault = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
+const rateLimiter = rateLimit({
+  windowMs: parseIntOrDefault(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
+  max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 60),
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use(rateLimiter);
 
 const PORT = process.env.PORT || process.env.AGGREGATOR_PORT || 4000;
 const TICKETMASTER_API_KEY = process.env.TICKETMASTER_API_KEY;
@@ -72,9 +101,25 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+app.get('/metrics', (req, res) => {
+  const uptimeSeconds = Math.floor((Date.now() - metrics.startTime) / 1000);
+  const avgDuration = metrics.requests > 0
+    ? Number((metrics.totalDurationMs / metrics.requests).toFixed(2))
+    : 0;
+  res.json({
+    uptime_seconds: uptimeSeconds,
+    requests_total: metrics.requests,
+    status_codes: metrics.statusCodes,
+    avg_duration_ms: avgDuration
+  });
+});
+
 app.get('/v1/events/search', async (req, res) => {
   try {
-    const response = await http.get(`${LOCAL_EVENTS_URL}/v1/events/search`, { params: req.query });
+    const response = await http.get(
+      `${LOCAL_EVENTS_URL}/v1/events/search`,
+      { params: req.query, headers: { Authorization: req.headers.authorization || '' } }
+    );
     return res.json(response.data);
   } catch (error) {
     console.error('Error proxying /v1/events/search:', error.message);
@@ -103,6 +148,19 @@ app.post('/v1/events/:id/save', async (req, res) => {
   } catch (error) {
     const status = error.response?.status || 502;
     return sendError(res, status, 'upstream_error', 'Failed to save event');
+  }
+});
+
+app.get('/v1/users/me/feed', async (req, res) => {
+  try {
+    const response = await http.get(
+      `${LOCAL_EVENTS_URL}/v1/users/me/feed`,
+      { params: req.query, headers: { Authorization: req.headers.authorization || '' } }
+    );
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to fetch feed');
   }
 });
 

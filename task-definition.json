@@ -2,7 +2,9 @@
     "family": "whatsthecraic-task",
     "executionRoleArn": "arn:aws:iam::395338916491:role/ecsTaskExecutionRole",
     "networkMode": "awsvpc",
-    "requiresCompatibilities": ["FARGATE"],
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
     "cpu": "512",
     "memory": "1024",
     "containerDefinitions": [
@@ -18,14 +20,34 @@
             ],
             "essential": true,
             "environment": [
-                {"name": "DB_HOST", "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"},
-                {"name": "DB_PORT", "value": "3306"},
-                {"name": "DB_USER", "value": "admin"},
-                {"name": "DB_PASSWORD", "value": "whatsthecraic123"},
-                {"name": "DB_NAME", "value": "gigsdb"},
-                {"name": "VENUE_SERVICE_URL", "value": "http://venue-service:4001"},
-                {"name": "DJ_SERVICE_URL", "value": "http://dj-service:4002"},
-                {"name": "LOCAL_EVENTS_URL", "value": "http://events-service:4003"}
+                {
+                    "name": "DB_HOST",
+                    "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"
+                },
+                {
+                    "name": "DB_PORT",
+                    "value": "3306"
+                },
+                {
+                    "name": "DB_USER",
+                    "value": "admin"
+                },
+                {
+                    "name": "DB_NAME",
+                    "value": "gigsdb"
+                },
+                {
+                    "name": "VENUE_SERVICE_URL",
+                    "value": "http://venue-service:4001"
+                },
+                {
+                    "name": "DJ_SERVICE_URL",
+                    "value": "http://dj-service:4002"
+                },
+                {
+                    "name": "LOCAL_EVENTS_URL",
+                    "value": "http://events-service:4003"
+                }
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -34,7 +56,17 @@
                     "awslogs-region": "eu-west-1",
                     "awslogs-stream-prefix": "ecs"
                 }
-            }
+            },
+            "secrets": [
+                {
+                    "name": "DB_PASSWORD",
+                    "valueFrom": "/whatsthecraic/prod/DB_PASSWORD"
+                },
+                {
+                    "name": "TICKETMASTER_API_KEY",
+                    "valueFrom": "/whatsthecraic/prod/TICKETMASTER_API_KEY"
+                }
+            ]
         },
         {
             "name": "dj-service",
@@ -48,11 +80,22 @@
             ],
             "essential": true,
             "environment": [
-                {"name": "DB_HOST", "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"},
-                {"name": "DB_PORT", "value": "3306"},
-                {"name": "DB_USER", "value": "admin"},
-                {"name": "DB_PASSWORD", "value": "whatsthecraic123"},
-                {"name": "DB_NAME", "value": "gigsdb"}
+                {
+                    "name": "DB_HOST",
+                    "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"
+                },
+                {
+                    "name": "DB_PORT",
+                    "value": "3306"
+                },
+                {
+                    "name": "DB_USER",
+                    "value": "admin"
+                },
+                {
+                    "name": "DB_NAME",
+                    "value": "gigsdb"
+                }
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -61,7 +104,13 @@
                     "awslogs-region": "eu-west-1",
                     "awslogs-stream-prefix": "ecs"
                 }
-            }
+            },
+            "secrets": [
+                {
+                    "name": "DB_PASSWORD",
+                    "valueFrom": "/whatsthecraic/prod/DB_PASSWORD"
+                }
+            ]
         },
         {
             "name": "events-service",
@@ -75,11 +124,38 @@
             ],
             "essential": true,
             "environment": [
-                {"name": "DB_HOST", "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"},
-                {"name": "DB_PORT", "value": "3306"},
-                {"name": "DB_USER", "value": "admin"},
-                {"name": "DB_PASSWORD", "value": "whatsthecraic123"},
-                {"name": "DB_NAME", "value": "gigsdb"}
+                {
+                    "name": "DB_HOST",
+                    "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"
+                },
+                {
+                    "name": "DB_PORT",
+                    "value": "3306"
+                },
+                {
+                    "name": "DB_USER",
+                    "value": "admin"
+                },
+                {
+                    "name": "DB_NAME",
+                    "value": "gigsdb"
+                },
+                {
+                    "name": "INGESTION_ENABLED",
+                    "value": "false"
+                },
+                {
+                    "name": "INGESTION_STALE_HOURS",
+                    "value": "6"
+                },
+                {
+                    "name": "INGESTION_DEFAULT_CITY",
+                    "value": "Dublin"
+                },
+                {
+                    "name": "INGESTION_MAX_PAGES",
+                    "value": "5"
+                }
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -88,7 +164,25 @@
                     "awslogs-region": "eu-west-1",
                     "awslogs-stream-prefix": "ecs"
                 }
-            }
+            },
+            "secrets": [
+                {
+                    "name": "DB_PASSWORD",
+                    "valueFrom": "/whatsthecraic/prod/DB_PASSWORD"
+                },
+                {
+                    "name": "TICKETMASTER_API_KEY",
+                    "valueFrom": "/whatsthecraic/prod/TICKETMASTER_API_KEY"
+                },
+                {
+                    "name": "EVENTBRITE_API_TOKEN",
+                    "valueFrom": "/whatsthecraic/prod/EVENTBRITE_API_TOKEN"
+                },
+                {
+                    "name": "JWT_SECRET",
+                    "valueFrom": "/whatsthecraic/prod/JWT_SECRET"
+                }
+            ]
         },
         {
             "name": "venue-service",
@@ -102,11 +196,22 @@
             ],
             "essential": true,
             "environment": [
-                {"name": "DB_HOST", "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"},
-                {"name": "DB_PORT", "value": "3306"},
-                {"name": "DB_USER", "value": "admin"},
-                {"name": "DB_PASSWORD", "value": "whatsthecraic123"},
-                {"name": "DB_NAME", "value": "gigsdb"}
+                {
+                    "name": "DB_HOST",
+                    "value": "x23332140.cluster-chwlezgyi7rm.eu-west-1.rds.amazonaws.com"
+                },
+                {
+                    "name": "DB_PORT",
+                    "value": "3306"
+                },
+                {
+                    "name": "DB_USER",
+                    "value": "admin"
+                },
+                {
+                    "name": "DB_NAME",
+                    "value": "gigsdb"
+                }
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -115,7 +220,13 @@
                     "awslogs-region": "eu-west-1",
                     "awslogs-stream-prefix": "ecs"
                 }
-            }
+            },
+            "secrets": [
+                {
+                    "name": "DB_PASSWORD",
+                    "valueFrom": "/whatsthecraic/prod/DB_PASSWORD"
+                }
+            ]
         }
     ]
 }

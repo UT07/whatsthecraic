@@ -10,6 +10,13 @@ const toMysqlDateTime = (value) => {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 };
 
+const toEventbriteDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+};
+
 const normalizeTitle = (value) => {
   return (value || '')
     .toString()
@@ -32,6 +39,23 @@ const timeBucket = (value) => {
   if (Number.isNaN(date.getTime())) return 'na';
   date.setMinutes(0, 0, 0);
   return date.toISOString();
+};
+
+const toTicketmasterDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+};
+
+const safeJsonParse = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    return null;
+  }
 };
 
 const buildDedupeKey = ({ title, start_time, latitude, longitude }) => {
@@ -120,7 +144,90 @@ const updateIngestState = async (pool, source, city, windowStart, windowEnd) => 
   );
 };
 
-const ingestTicketmaster = async (pool, { city, startDate, endDate, apiKey, maxPages = 5 }) => {
+const fetchEventbriteOrganizations = async (token) => {
+  const response = await http.get('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return response.data?.organizations || [];
+};
+
+const ingestEventbriteOrganizationEvents = async (pool, { city, startDate, endDate, token, maxPages = 5, orgIds }) => {
+  const startDateTime = toEventbriteDate(startDate);
+  const endDateTime = toEventbriteDate(endDate);
+  const organizations = (orgIds && orgIds.length)
+    ? orgIds.map(id => ({ id }))
+    : await fetchEventbriteOrganizations(token);
+
+  let ingested = 0;
+
+  for (const org of organizations) {
+    const orgId = org.id;
+    if (!orgId) continue;
+
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore && page <= maxPages) {
+      const response = await http.get(`https://www.eventbriteapi.com/v3/organizations/${orgId}/events/`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          'start_date.range_start': startDateTime,
+          'start_date.range_end': endDateTime,
+          expand: 'venue',
+          page
+        }
+      });
+
+      const data = response.data || {};
+      const events = data.events || [];
+      hasMore = data.pagination?.has_more_items || false;
+
+      for (const evt of events) {
+        const venue = evt.venue || {};
+        const address = venue.address || {};
+
+        const eventRecord = {
+          title: evt.name?.text || evt.name,
+          description: evt.description?.text || null,
+          start_time: toMysqlDateTime(evt.start?.utc || evt.start?.local),
+          end_time: toMysqlDateTime(evt.end?.utc || evt.end?.local),
+          city: address.city || city,
+          latitude: venue.latitude || null,
+          longitude: venue.longitude || null,
+          venue_name: venue.name || null,
+          ticket_url: evt.url || null,
+          age_restriction: evt.age_restriction || null,
+          price_min: null,
+          price_max: null,
+          currency: null,
+          genres: [],
+          tags: ['eventbrite'],
+          images: evt.logo ? [evt.logo] : []
+        };
+
+        if (!eventRecord.title || !eventRecord.start_time) {
+          continue;
+        }
+
+        const eventId = await upsertEvent(pool, eventRecord);
+        await upsertSourceEvent(pool, {
+          source: 'eventbrite',
+          source_id: evt.id,
+          event_id: eventId,
+          raw_payload: evt
+        });
+        ingested += 1;
+      }
+
+      page += 1;
+    }
+  }
+
+  await updateIngestState(pool, 'eventbrite', city, startDate, endDate);
+  return { source: 'eventbrite', skipped: false, count: ingested };
+};
+
+const ingestTicketmaster = async (pool, { city, startDate, endDate, apiKey, countryCode, maxPages = 5 }) => {
   if (!apiKey) {
     return { source: 'ticketmaster', skipped: true, reason: 'missing_api_key', count: 0 };
   }
@@ -129,8 +236,8 @@ const ingestTicketmaster = async (pool, { city, startDate, endDate, apiKey, maxP
   let ingested = 0;
   let totalPages = 1;
 
-  const startDateTime = new Date(startDate).toISOString();
-  const endDateTime = new Date(endDate).toISOString();
+  const startDateTime = toTicketmasterDate(startDate);
+  const endDateTime = toTicketmasterDate(endDate);
 
   while (page < totalPages && page < maxPages) {
     const url = 'https://app.ticketmaster.com/discovery/v2/events.json';
@@ -138,6 +245,7 @@ const ingestTicketmaster = async (pool, { city, startDate, endDate, apiKey, maxP
       params: {
         apikey: apiKey,
         city,
+        ...(countryCode ? { countryCode } : {}),
         startDateTime,
         endDateTime,
         size: 100,
@@ -203,7 +311,7 @@ const ingestTicketmaster = async (pool, { city, startDate, endDate, apiKey, maxP
   return { source: 'ticketmaster', skipped: false, count: ingested };
 };
 
-const ingestEventbrite = async (pool, { city, startDate, endDate, token, maxPages = 5 }) => {
+const ingestEventbrite = async (pool, { city, startDate, endDate, token, maxPages = 5, orgIds }) => {
   if (!token) {
     return { source: 'eventbrite', skipped: true, reason: 'missing_api_token', count: 0 };
   }
@@ -212,20 +320,32 @@ const ingestEventbrite = async (pool, { city, startDate, endDate, token, maxPage
   let ingested = 0;
   let hasMore = true;
 
-  const startDateTime = new Date(startDate).toISOString();
-  const endDateTime = new Date(endDate).toISOString();
+  const startDateTime = toEventbriteDate(startDate);
+  const endDateTime = toEventbriteDate(endDate);
 
   while (hasMore && page <= maxPages) {
-    const response = await http.get('https://www.eventbriteapi.com/v3/events/search/', {
-      headers: { Authorization: `Bearer ${token}` },
-      params: {
-        'location.address': city,
-        'start_date.range_start': startDateTime,
-        'start_date.range_end': endDateTime,
-        expand: 'venue',
-        page
+    let response;
+    try {
+      response = await http.get('https://www.eventbriteapi.com/v3/events/search/', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          'location.address': city,
+          'start_date.range_start': startDateTime,
+          'start_date.range_end': endDateTime,
+          expand: 'venue',
+          page
+        }
+      });
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 404) {
+        return await ingestEventbriteOrganizationEvents(pool, { city, startDate, endDate, token, maxPages, orgIds });
       }
-    });
+      if (status) {
+        return { source: 'eventbrite', skipped: true, reason: `http_${status}`, count: ingested };
+      }
+      throw err;
+    }
 
     const data = response.data || {};
     const events = data.events || [];
@@ -275,9 +395,143 @@ const ingestEventbrite = async (pool, { city, startDate, endDate, token, maxPage
   return { source: 'eventbrite', skipped: false, count: ingested };
 };
 
+const extractXravesNextData = (html) => {
+  if (!html) return null;
+  const match = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
+  if (!match || !match[1]) return null;
+  return safeJsonParse(match[1].trim());
+};
+
+const extractXravesEvents = (nextData) => {
+  const fallback = nextData?.props?.pageProps?.fallback;
+  if (!fallback || typeof fallback !== 'object') return [];
+  const candidates = [];
+  for (const value of Object.values(fallback)) {
+    if (Array.isArray(value)) {
+      candidates.push(...value);
+    }
+  }
+  return candidates.filter(item => {
+    const attrs = item?.attributes;
+    return attrs?.name && (attrs?.startDateTime || attrs?.start_date || attrs?.eventUrl);
+  });
+};
+
+const resolveUrl = (baseUrl, value) => {
+  if (!value || typeof value !== 'string') return null;
+  if (value.startsWith('http://') || value.startsWith('https://')) return value;
+  if (!baseUrl) return value;
+  const trimmedBase = baseUrl.replace(/\/+$/, '');
+  const trimmedValue = value.startsWith('/') ? value : `/${value}`;
+  return `${trimmedBase}${trimmedValue}`;
+};
+
+const extractXravesImages = (attrs) => {
+  const images = [];
+  const pushUrl = (url) => {
+    if (url && typeof url === 'string') {
+      images.push({ url });
+    }
+  };
+  const eventImage = attrs?.eventImage;
+  if (typeof eventImage === 'string') {
+    pushUrl(eventImage);
+    return images;
+  }
+  pushUrl(eventImage?.url);
+  pushUrl(eventImage?.data?.attributes?.url);
+  const formats = eventImage?.data?.attributes?.formats;
+  if (formats && typeof formats === 'object') {
+    Object.values(formats).forEach(format => pushUrl(format?.url));
+  }
+  return images;
+};
+
+const ingestXraves = async (pool, { baseUrl, userAgent, city, startDate, endDate, enabled = true }) => {
+  if (!enabled) {
+    return { source: 'xraves', skipped: true, reason: 'disabled', count: 0 };
+  }
+
+  const resolvedBaseUrl = baseUrl || 'https://xraves.ie/';
+  const headers = {
+    'User-Agent': userAgent || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache'
+  };
+  const response = await http.get(resolvedBaseUrl, { headers });
+  const nextData = extractXravesNextData(response.data);
+  if (!nextData) {
+    return { source: 'xraves', skipped: true, reason: 'missing_next_data', count: 0 };
+  }
+
+  const events = extractXravesEvents(nextData);
+  const seen = new Set();
+  let ingested = 0;
+
+  for (const item of events) {
+    const sourceId = item?.id ? String(item.id) : null;
+    if (!sourceId || seen.has(sourceId)) {
+      continue;
+    }
+    seen.add(sourceId);
+
+    const attrs = item.attributes || {};
+    const venue = attrs.venue || {};
+    const venueLocation = safeJsonParse(venue.venueLocation);
+    const address = venueLocation?.address || venueLocation || {};
+    const cityName =
+      address.addressLocality ||
+      address.locality ||
+      venue.venueCounty ||
+      city ||
+      null;
+
+    const eventRecord = {
+      title: attrs.name || null,
+      description: attrs.eventDescription || attrs.description || null,
+      start_time: toMysqlDateTime(attrs.startDateTime || attrs.start_date),
+      end_time: toMysqlDateTime(attrs.endDateTime || attrs.end_date),
+      city: cityName,
+      latitude: venue.venueLat || address?.geo?.latitude || null,
+      longitude: venue.venueLng || address?.geo?.longitude || null,
+      venue_name: venue.venueName || null,
+      ticket_url: resolveUrl(resolvedBaseUrl, attrs.eventUrl),
+      age_restriction: null,
+      price_min: null,
+      price_max: null,
+      currency: null,
+      genres: (attrs.genres?.data || [])
+        .map(item => item?.attributes?.genreName || item?.attributes?.name)
+        .filter(Boolean)
+        .map(value => value.toLowerCase()),
+      tags: ['xraves'],
+      images: extractXravesImages(attrs)
+    };
+
+    if (!eventRecord.title || !eventRecord.start_time) {
+      continue;
+    }
+
+    const eventId = await upsertEvent(pool, eventRecord);
+    await upsertSourceEvent(pool, {
+      source: 'xraves',
+      source_id: sourceId,
+      event_id: eventId,
+      raw_payload: item
+    });
+    ingested += 1;
+  }
+
+  await updateIngestState(pool, 'xraves', city || 'Ireland', startDate, endDate);
+  return { source: 'xraves', skipped: false, count: ingested };
+};
+
 module.exports = {
   ingestTicketmaster,
   ingestEventbrite,
+  ingestXraves,
   upsertEvent,
   upsertSourceEvent
 };
