@@ -1,31 +1,29 @@
-import axios from 'axios';
-
-const API_BASE = process.env.REACT_APP_API_BASE || 'https://ec2-18-201-228-48.eu-west-1.compute.amazonaws.com';
+import { apiClient } from './apiClient';
 
 const djAPI = {
   // Get all DJs
   getAllDJs: async () => {
-    const response = await axios.get(`${API_BASE}/djs`);
+    const response = await apiClient.get('/djs');
     return response.data;
   },
   // Get one DJ by id
   getDJ: async (djId) => {
-    const response = await axios.get(`${API_BASE}/djs/${djId}`);
+    const response = await apiClient.get(`/djs/${djId}`);
     return response.data;
   },
   // Add a new DJ (based on your schema)
   addDJ: async (djData) => {
-    const response = await axios.post(`${API_BASE}/djs`, djData);
+    const response = await apiClient.post('/djs', djData);
     return response.data;
   },
   // Update an existing DJ by id
   updateDJ: async (djId, djData) => {
-    const response = await axios.put(`${API_BASE}/djs/${djId}`, djData);
+    const response = await apiClient.put(`/djs/${djId}`, djData);
     return response.data;
   },
   // Delete a DJ by id
   deleteDJ: async (djId) => {
-    const response = await axios.delete(`${API_BASE}/djs/${djId}`);
+    const response = await apiClient.delete(`/djs/${djId}`);
     return response.data;
   },
 };

@@ -1,33 +1,41 @@
-import axios from 'axios';
-
-const API_BASE = process.env.REACT_APP_API_BASE || 'https://ec2-18-201-228-48.eu-west-1.compute.amazonaws.com';
+import { apiClient } from './apiClient';
 
 const eventsAPI = {
-  // Get all events (local_events table)
-  getAllEvents: async () => {
-    const response = await axios.get(`${API_BASE}/events`);
+  // Canonical events search
+  searchEvents: async (filters) => {
+    const response = await apiClient.get('/v1/events/search', { params: filters });
     return response.data;
   },
-  // Get one event by id
+  // Personalized feed
+  getFeed: async (filters) => {
+    const response = await apiClient.get('/v1/users/me/feed', { params: filters });
+    return response.data;
+  },
   getEvent: async (eventId) => {
-    const response = await axios.get(`${API_BASE}/events/${eventId}`);
+    const response = await apiClient.get(`/v1/events/${eventId}`);
     return response.data;
   },
-  // Add a new event (fields: event_name, classification_name, city, date_local, time_local, venue_name, url)
-  addEvent: async (eventData) => {
-    const response = await axios.post(`${API_BASE}/events`, eventData);
+  saveEvent: async (eventId) => {
+    const response = await apiClient.post(`/v1/events/${eventId}/save`);
     return response.data;
   },
-  // Update an existing event by id
-  updateEvent: async (eventId, eventData) => {
-    const response = await axios.put(`${API_BASE}/events/${eventId}`, eventData);
+  // Local/manual events (optional)
+  getLocalEvents: async () => {
+    const response = await apiClient.get('/events');
     return response.data;
   },
-  // Delete an event by id
-  deleteEvent: async (eventId) => {
-    const response = await axios.delete(`${API_BASE}/events/${eventId}`);
+  addLocalEvent: async (eventData) => {
+    const response = await apiClient.post('/events', eventData);
     return response.data;
   },
+  updateLocalEvent: async (eventId, eventData) => {
+    const response = await apiClient.put(`/events/${eventId}`, eventData);
+    return response.data;
+  },
+  deleteLocalEvent: async (eventId) => {
+    const response = await apiClient.delete(`/events/${eventId}`);
+    return response.data;
+  }
 };
 
 export default eventsAPI;
