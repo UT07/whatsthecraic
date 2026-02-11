@@ -304,6 +304,14 @@ const requireOrganizer = (req, res, next) => {
   return sendError(res, 403, 'forbidden', 'Organizer role required');
 };
 
+const requireAdmin = (req, res, next) => {
+  const role = req.user?.role;
+  if (role === 'admin') {
+    return next();
+  }
+  return sendError(res, 403, 'forbidden', 'Admin role required');
+};
+
 const inflightIngestion = new Set();
 const userBandsintownSync = new Map();
 
@@ -844,6 +852,40 @@ const getUserSignals = async (userId) => {
       .filter(Boolean)
     : [];
 
+  const [savedRows] = await pool.query(
+    `SELECT e.id, e.genres, e.city, e.venue_name, e.title
+     FROM user_saved_events se
+     JOIN events e ON e.id = se.event_id
+     WHERE se.user_id = ?
+     ORDER BY se.saved_at DESC
+     LIMIT 80`,
+    [userId]
+  );
+  const savedGenres = new Set();
+  const savedCities = new Set();
+  const savedVenues = new Set();
+  const savedTitles = new Set();
+  const savedEventIds = new Set();
+  savedRows.forEach((saved) => {
+    savedEventIds.add(saved.id);
+    parseJson(saved.genres).forEach((genre) => {
+      const token = normalizeToken(genre);
+      if (token) savedGenres.add(token);
+    });
+    if (saved.city) {
+      const cityToken = normalizeToken(saved.city);
+      if (cityToken) savedCities.add(cityToken);
+    }
+    if (saved.venue_name) {
+      const venueToken = normalizeToken(saved.venue_name);
+      if (venueToken) savedVenues.add(venueToken);
+    }
+    if (saved.title) {
+      const titleToken = normalizeToken(saved.title);
+      if (titleToken) savedTitles.add(titleToken);
+    }
+  });
+
   return {
     preferredGenres: preferredGenres.map(normalizeToken).filter(Boolean),
     preferredArtists: preferredArtists.map(normalizeToken).filter(Boolean),
@@ -854,13 +896,23 @@ const getUserSignals = async (userId) => {
     radiusKm,
     nightPreferences: nightPreferences.map(normalizeToken).filter(Boolean),
     spotifyGenres,
-    spotifyArtists
+    spotifyArtists,
+    savedGenres: Array.from(savedGenres),
+    savedCities: Array.from(savedCities),
+    savedVenues: Array.from(savedVenues),
+    savedTitles: Array.from(savedTitles),
+    savedEventIds
   };
 };
 
 const scoreEventRow = (row, signals) => {
   const reasons = [];
   let score = 0;
+
+  const savedGenres = signals.savedGenres || [];
+  const savedCities = signals.savedCities || [];
+  const savedVenues = signals.savedVenues || [];
+  const savedTitles = signals.savedTitles || [];
 
   const genres = parseJson(row.genres).map(normalizeToken).filter(Boolean);
   const title = normalizeToken(row.title);
@@ -909,6 +961,33 @@ const scoreEventRow = (row, signals) => {
   if (djMatches.length > 0) {
     score += djMatches.length * 4;
     reasons.push({ type: 'preferred_dj', values: djMatches.slice(0, 3) });
+  }
+
+  if (signals.savedEventIds?.has(row.id)) {
+    score += 7;
+    reasons.push({ type: 'saved_event' });
+  }
+
+  const savedGenreMatches = genres.filter(g => savedGenres.includes(g));
+  if (savedGenreMatches.length > 0) {
+    score += savedGenreMatches.length * 2;
+    reasons.push({ type: 'saved_genre', values: savedGenreMatches.slice(0, 3) });
+  }
+
+  const cityToken = normalizeToken(row.city);
+  if (signals.savedCities.includes(cityToken)) {
+    score += 2;
+    reasons.push({ type: 'saved_city', values: [row.city] });
+  }
+
+  if (signals.savedVenues.includes(venueName)) {
+    score += 2;
+    reasons.push({ type: 'saved_venue', values: [row.venue_name] });
+  }
+
+  if (savedTitles.includes(title)) {
+    score += 2;
+    reasons.push({ type: 'saved_title' });
   }
 
   if (signals.preferredCities.length > 0 && row.city) {
@@ -1512,6 +1591,31 @@ app.get('/v1/alerts/notifications', requireAuth, async (req, res) => {
   }
 
   return res.json({ alerts: payload });
+});
+
+app.get('/v1/admin/ingestion/health', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [stateRows] = await pool.query(
+      `SELECT source, city, last_synced_at, window_start, window_end
+       FROM ingest_state
+       ORDER BY last_synced_at DESC
+       LIMIT 200`
+    );
+    const [sourceRows] = await pool.query(
+      `SELECT source, COUNT(*) AS count, MAX(last_seen_at) AS last_seen_at
+       FROM source_events
+       GROUP BY source`
+    );
+    const [[eventsTotal]] = await pool.query('SELECT COUNT(*) AS total_events FROM events');
+    return res.json({
+      total_events: eventsTotal?.total_events || 0,
+      ingest_state: stateRows,
+      source_counts: sourceRows
+    });
+  } catch (err) {
+    console.error('Error fetching ingestion health:', err);
+    return sendError(res, 500, 'internal_error', 'Failed to fetch ingestion health');
+  }
 });
 
 app.get('/v1/events/:id/calendar', async (req, res) => {
