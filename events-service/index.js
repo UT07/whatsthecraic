@@ -6,7 +6,14 @@ const mysql = require('mysql2/promise');
 const crypto = require('crypto');
 const { z } = require('zod');
 const jwt = require('jsonwebtoken');
-const { ingestTicketmaster, ingestEventbrite, ingestXraves, upsertEvent, upsertSourceEvent } = require('./ingestion');
+const {
+  ingestTicketmaster,
+  ingestEventbrite,
+  ingestBandsintownArtists,
+  ingestDiceApify,
+  upsertEvent,
+  upsertSourceEvent
+} = require('./ingestion');
 const rateLimit = require('express-rate-limit');
 
 // Adjust these env vars / defaults as needed
@@ -17,6 +24,7 @@ const DB_PASSWORD = process.env.DB_PASSWORD || 'app';
 const DB_NAME = process.env.DB_NAME || 'gigsdb';
 const API_PORT = process.env.API_PORT || process.env.EVENTS_SERVICE_PORT || 4003;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+const SERVICE_NAME = 'events-service';
 
 const INGESTION_ENABLED = (process.env.INGESTION_ENABLED || 'false') === 'true';
 const INGESTION_STALE_HOURS = Number.parseInt(process.env.INGESTION_STALE_HOURS || '6', 10);
@@ -28,10 +36,60 @@ const EVENTBRITE_API_TOKEN = process.env.EVENTBRITE_API_TOKEN || null;
 const EVENTBRITE_ORG_IDS = process.env.EVENTBRITE_ORG_IDS
   ? process.env.EVENTBRITE_ORG_IDS.split(',').map(id => id.trim()).filter(Boolean)
   : null;
-const XRAVES_ENABLED = (process.env.XRAVES_ENABLED || 'false') === 'true';
-const XRAVES_BASE_URL = process.env.XRAVES_BASE_URL || 'https://xraves.ie/';
-const XRAVES_USER_AGENT = process.env.XRAVES_USER_AGENT || 'WhatsTheCraicIngestionBot/1.0';
-const XRAVES_SCRAPER_URL = process.env.XRAVES_SCRAPER_URL || null;
+const DICE_APIFY_ENABLED = (process.env.DICE_APIFY_ENABLED || 'false') === 'true';
+const DICE_APIFY_ACTOR = process.env.DICE_APIFY_ACTOR || 'lexis-solutions~dice-fm';
+const DICE_APIFY_MAX_ITEMS = Number.parseInt(process.env.DICE_APIFY_MAX_ITEMS || '200', 10);
+const DICE_APIFY_USE_PROXY = (process.env.DICE_APIFY_USE_PROXY || 'true') === 'true';
+const APIFY_TOKEN = process.env.APIFY_TOKEN || null;
+const BANDSINTOWN_APP_ID = process.env.BANDSINTOWN_APP_ID || null;
+const BANDSINTOWN_MAX_ARTISTS = Number.parseInt(process.env.BANDSINTOWN_MAX_ARTISTS || '15', 10);
+const BANDSINTOWN_MAX_EVENTS = Number.parseInt(process.env.BANDSINTOWN_MAX_EVENTS || '300', 10);
+const BANDSINTOWN_SEED_ARTISTS = process.env.BANDSINTOWN_SEED_ARTISTS
+  ? process.env.BANDSINTOWN_SEED_ARTISTS.split(',').map(name => name.trim()).filter(Boolean)
+  : [];
+const BANDSINTOWN_ALLOW_ANY_ARTIST = (process.env.BANDSINTOWN_ALLOW_ANY_ARTIST || 'false') === 'true';
+const BANDSINTOWN_USER_SYNC_HOURS = Number.parseInt(process.env.BANDSINTOWN_USER_SYNC_HOURS || '12', 10);
+const BANDSINTOWN_USER_MAX_ARTISTS = Number.parseInt(process.env.BANDSINTOWN_USER_MAX_ARTISTS || '10', 10);
+
+const warnOnMissingEnv = () => {
+  const missing = [];
+  const warnings = [];
+  if (!DB_HOST) missing.push('DB_HOST');
+  if (!DB_USER) missing.push('DB_USER');
+  if (!DB_PASSWORD) missing.push('DB_PASSWORD');
+  if (!DB_NAME) missing.push('DB_NAME');
+  if (!JWT_SECRET || JWT_SECRET === 'dev-secret') warnings.push('JWT_SECRET is using the default dev value');
+  if (INGESTION_ENABLED && !TICKETMASTER_API_KEY) warnings.push('INGESTION_ENABLED without TICKETMASTER_API_KEY');
+  if (INGESTION_ENABLED && !EVENTBRITE_API_TOKEN) warnings.push('INGESTION_ENABLED without EVENTBRITE_API_TOKEN');
+  if (DICE_APIFY_ENABLED && !APIFY_TOKEN) warnings.push('DICE_APIFY_ENABLED without APIFY_TOKEN');
+  if (BANDSINTOWN_APP_ID === null) warnings.push('BANDSINTOWN_APP_ID not set');
+
+  const messages = [];
+  if (missing.length) messages.push(`Missing required env: ${missing.join(', ')}`);
+  if (warnings.length) messages.push(...warnings);
+  if (messages.length === 0) return;
+  const text = `[${SERVICE_NAME}] ${messages.join(' | ')}`;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(text);
+  }
+  console.warn(text);
+};
+
+warnOnMissingEnv();
+
+const logRequest = ({ requestId, method, path, status, durationMs }) => {
+  const payload = {
+    level: 'info',
+    service: SERVICE_NAME,
+    request_id: requestId,
+    method,
+    path,
+    status,
+    duration_ms: durationMs,
+    timestamp: new Date().toISOString()
+  };
+  console.log(JSON.stringify(payload));
+};
 
 const pool = mysql.createPool({
   host: DB_HOST,
@@ -42,6 +100,87 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10
 });
+
+const ensureEventsSchema = async () => {
+  try {
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS user_hidden_events (
+        user_id INT NOT NULL,
+        event_id INT NOT NULL,
+        hidden_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, event_id),
+        KEY user_hidden_events_event_idx (event_id),
+        CONSTRAINT fk_hidden_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_hidden_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+    );
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS user_alerts (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        artist_name VARCHAR(255) NOT NULL,
+        city VARCHAR(100),
+        radius_km INT,
+        last_notified_at TIMESTAMP NULL DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX user_alerts_user_idx (user_id),
+        CONSTRAINT fk_user_alerts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+    );
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS event_plans (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        city VARCHAR(100),
+        start_date DATETIME,
+        end_date DATETIME,
+        capacity INT,
+        budget_min DECIMAL(10,2),
+        budget_max DECIMAL(10,2),
+        genres JSON,
+        gear_needs JSON,
+        vibe_tags JSON,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX event_plans_user_idx (user_id),
+        CONSTRAINT fk_event_plans_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+    );
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS event_plan_shortlists (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        plan_id INT NOT NULL,
+        item_type VARCHAR(16) NOT NULL,
+        item_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_plan_item (plan_id, item_type, item_id),
+        CONSTRAINT fk_plan_shortlist_plan FOREIGN KEY (plan_id) REFERENCES event_plans(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+    );
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS contact_requests (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        plan_id INT DEFAULT NULL,
+        item_type VARCHAR(16) NOT NULL,
+        item_id INT NOT NULL,
+        message TEXT NOT NULL,
+        status VARCHAR(32) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX contact_requests_user_idx (user_id),
+        CONSTRAINT fk_contact_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_contact_plan FOREIGN KEY (plan_id) REFERENCES event_plans(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+    );
+  } catch (err) {
+    console.error('[events-service] Schema check failed:', err.message);
+  }
+};
+
+void ensureEventsSchema();
 
 const app = express();
 app.use(cors());
@@ -67,7 +206,13 @@ app.use((req, res, next) => {
     metrics.requests += 1;
     metrics.totalDurationMs += durationMs;
     metrics.statusCodes[res.statusCode] = (metrics.statusCodes[res.statusCode] || 0) + 1;
-    console.log(`[${requestId}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
+    logRequest({
+      requestId,
+      method: req.method,
+      path: req.originalUrl,
+      status: res.statusCode,
+      durationMs
+    });
   });
   next();
 });
@@ -88,7 +233,9 @@ const rateLimiter = rateLimit({
   legacyHeaders: false
 });
 
-app.use(rateLimiter);
+if (process.env.NODE_ENV !== 'test') {
+  app.use(rateLimiter);
+}
 
 app.get('/metrics', (req, res) => {
   const uptimeSeconds = Math.floor((Date.now() - metrics.startTime) / 1000);
@@ -158,6 +305,67 @@ const requireOrganizer = (req, res, next) => {
 };
 
 const inflightIngestion = new Set();
+const userBandsintownSync = new Map();
+
+const filterBandsintownArtists = (artists) => {
+  const cleaned = dedupeList(artists);
+  if (BANDSINTOWN_ALLOW_ANY_ARTIST) {
+    return cleaned;
+  }
+  if (BANDSINTOWN_SEED_ARTISTS.length === 0) {
+    return [];
+  }
+  const allowed = new Set(BANDSINTOWN_SEED_ARTISTS.map(normalizeToken));
+  return cleaned.filter(name => allowed.has(normalizeToken(name)));
+};
+
+const getBandsintownSeedArtists = async () => {
+  const seeds = [...BANDSINTOWN_SEED_ARTISTS];
+  if (seeds.length >= BANDSINTOWN_MAX_ARTISTS) {
+    return dedupeList(seeds).slice(0, BANDSINTOWN_MAX_ARTISTS);
+  }
+  try {
+    const [rows] = await pool.query(
+      'SELECT dj_name FROM djs WHERE dj_name IS NOT NULL AND dj_name != "" LIMIT ?',
+      [BANDSINTOWN_MAX_ARTISTS]
+    );
+    const djNames = rows.map(row => row.dj_name);
+    return dedupeList([...seeds, ...djNames]).slice(0, BANDSINTOWN_MAX_ARTISTS);
+  } catch (err) {
+    console.warn('Failed to load DJ names for Bandsintown seed:', err.message);
+    return dedupeList(seeds).slice(0, BANDSINTOWN_MAX_ARTISTS);
+  }
+};
+
+const maybeTriggerBandsintownForUser = async (userId, city, startDate, endDate) => {
+  if (!BANDSINTOWN_APP_ID) return;
+  const lastSync = userBandsintownSync.get(userId);
+  if (lastSync && Date.now() - lastSync < BANDSINTOWN_USER_SYNC_HOURS * 60 * 60 * 1000) {
+    return;
+  }
+
+  try {
+    const signals = await getUserSignals(userId);
+    const spotifyArtists = (signals.spotifyArtists || []).slice(0, BANDSINTOWN_USER_MAX_ARTISTS);
+    const artists = filterBandsintownArtists(spotifyArtists);
+    if (artists.length === 0) return;
+
+    userBandsintownSync.set(userId, Date.now());
+    setImmediate(() => ingestBandsintownArtists(pool, {
+      artists,
+      appId: BANDSINTOWN_APP_ID,
+      startDate,
+      endDate,
+      city: city || INGESTION_DEFAULT_CITY,
+      maxArtists: BANDSINTOWN_USER_MAX_ARTISTS,
+      maxEvents: BANDSINTOWN_MAX_EVENTS
+    }).catch(err => {
+      console.warn('Bandsintown user ingestion failed:', err.message);
+    }));
+  } catch (err) {
+    console.warn('Bandsintown user ingestion skipped:', err.message);
+  }
+};
 
 const triggerIngestion = async (source, city, startDate, endDate) => {
   const key = `${source}:${city}`;
@@ -184,15 +392,31 @@ const triggerIngestion = async (source, city, startDate, endDate) => {
         maxPages: INGESTION_MAX_PAGES
       });
     }
-    if (source === 'xraves') {
-      await ingestXraves(pool, {
+    if (source === 'bandsintown') {
+      const artists = filterBandsintownArtists(await getBandsintownSeedArtists());
+      if (artists.length === 0) {
+        return;
+      }
+      await ingestBandsintownArtists(pool, {
+        artists,
+        appId: BANDSINTOWN_APP_ID,
+        startDate,
+        endDate,
+        city,
+        maxArtists: BANDSINTOWN_MAX_ARTISTS,
+        maxEvents: BANDSINTOWN_MAX_EVENTS
+      });
+    }
+    if (source === 'dice') {
+      await ingestDiceApify(pool, {
         city,
         startDate,
         endDate,
-        baseUrl: XRAVES_BASE_URL,
-        userAgent: XRAVES_USER_AGENT,
-        scraperUrl: XRAVES_SCRAPER_URL,
-        enabled: XRAVES_ENABLED
+        enabled: DICE_APIFY_ENABLED,
+        actorId: DICE_APIFY_ACTOR,
+        apifyToken: APIFY_TOKEN,
+        maxItems: DICE_APIFY_MAX_ITEMS,
+        useProxy: DICE_APIFY_USE_PROXY
       });
     }
   } catch (err) {
@@ -210,7 +434,7 @@ const maybeTriggerIngestion = async (city, startDate, endDate) => {
   );
   const lastSynced = new Map(rows.map(row => [row.source, new Date(row.last_synced_at)]));
   const staleThreshold = Date.now() - (INGESTION_STALE_HOURS * 60 * 60 * 1000);
-  const sources = ['ticketmaster', 'eventbrite', 'xraves'];
+  const sources = ['ticketmaster', 'eventbrite', 'bandsintown', 'dice'];
   sources.forEach((source) => {
     const last = lastSynced.get(source);
     if (!last || last.getTime() < staleThreshold) {
@@ -220,18 +444,35 @@ const maybeTriggerIngestion = async (city, startDate, endDate) => {
 };
 
 const syncLocalEventsToCanonical = async () => {
+  const formatDateOnly = (value) => {
+    if (!value) return null;
+    if (value instanceof Date) {
+      return value.toISOString().slice(0, 10);
+    }
+    const text = value.toString();
+    return text.length >= 10 ? text.slice(0, 10) : text;
+  };
+  const formatTimeOnly = (value) => {
+    if (!value) return null;
+    if (value instanceof Date) {
+      return value.toISOString().slice(11, 19);
+    }
+    const text = value.toString();
+    return text.length >= 8 ? text.slice(0, 8) : text;
+  };
   const [rows] = await pool.query(
     `SELECT le.*
      FROM local_events le
      LEFT JOIN source_events se
-       ON se.source = 'local' AND se.source_id = CAST(le.id AS CHAR) COLLATE utf8mb4_0900_ai_ci
+       ON se.source = 'local' AND CAST(se.source_id AS UNSIGNED) = le.id
      WHERE se.id IS NULL`
   );
   for (const ev of rows) {
     if (!ev.event_name || !ev.date_local) continue;
-    const start = ev.time_local
-      ? `${ev.date_local}T${ev.time_local}`
-      : `${ev.date_local}T00:00:00`;
+    const datePart = formatDateOnly(ev.date_local);
+    const timePart = formatTimeOnly(ev.time_local);
+    if (!datePart) continue;
+    const start = timePart ? `${datePart}T${timePart}` : `${datePart}T00:00:00`;
     const startDate = new Date(start);
     if (Number.isNaN(startDate.getTime())) continue;
     const eventRecord = {
@@ -455,6 +696,18 @@ const parseJson = (value, fallback = []) => {
 
 const normalizeToken = (value) => (value ?? '').toString().toLowerCase().trim();
 
+const dedupeList = (items) => {
+  const seen = new Set();
+  const result = [];
+  for (const item of items) {
+    const key = normalizeToken(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+};
+
 const normalizeTokenList = (value) => {
   if (Array.isArray(value)) {
     return value.map(normalizeToken).filter(Boolean);
@@ -466,6 +719,66 @@ const normalizeTokenList = (value) => {
       .filter(Boolean);
   }
   return [];
+};
+
+const getTokenFromRequest = (req) => {
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+  if (req.query && typeof req.query.token === 'string' && req.query.token.trim()) {
+    return req.query.token.trim();
+  }
+  return null;
+};
+
+const sanitizeIcsText = (value) => {
+  return (value || '')
+    .toString()
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
+};
+
+const formatIcsDate = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const iso = date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  return iso;
+};
+
+const buildCalendarEvent = (event) => {
+  const start = formatIcsDate(event.start_time);
+  if (!start) return '';
+  const end = event.end_time ? formatIcsDate(event.end_time) : null;
+  const lines = [
+    'BEGIN:VEVENT',
+    `UID:wtc-event-${event.id}@whatsthecraic`,
+    `DTSTAMP:${formatIcsDate(new Date())}`,
+    `DTSTART:${start}`,
+    end ? `DTEND:${end}` : null,
+    `SUMMARY:${sanitizeIcsText(event.title)}`,
+    event.description ? `DESCRIPTION:${sanitizeIcsText(event.description)}` : null,
+    event.venue_name || event.city
+      ? `LOCATION:${sanitizeIcsText([event.venue_name, event.city].filter(Boolean).join(' - '))}`
+      : null,
+    event.ticket_url ? `URL:${sanitizeIcsText(event.ticket_url)}` : null,
+    'END:VEVENT'
+  ].filter(Boolean);
+  return lines.join('\r\n');
+};
+
+const buildCalendarFile = (events) => {
+  const body = events.map(buildCalendarEvent).filter(Boolean).join('\r\n');
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//WhatsTheCraic//EN',
+    'CALSCALE:GREGORIAN',
+    body,
+    'END:VCALENDAR'
+  ].filter(Boolean).join('\r\n');
 };
 
 const buildEventResponse = (row, sources = []) => {
@@ -681,9 +994,13 @@ app.get('/v1/events/search', async (req, res) => {
     from: z.string().optional(),
     to: z.string().optional(),
     genres: z.string().optional(),
+    q: z.string().optional(),
+    artist: z.string().optional(),
+    venue: z.string().optional(),
     priceMax: z.string().optional(),
-    source: z.enum(['eventbrite', 'ticketmaster', 'xraves', 'local']).optional(),
+    source: z.enum(['eventbrite', 'ticketmaster', 'bandsintown', 'dice', 'local']).optional(),
     rank: z.enum(['time', 'personalized']).optional(),
+    includeHidden: z.string().optional(),
     limit: z.string().optional(),
     offset: z.string().optional()
   });
@@ -697,9 +1014,13 @@ app.get('/v1/events/search', async (req, res) => {
     from,
     to,
     genres,
+    q,
+    artist,
+    venue,
     priceMax,
     source,
     rank,
+    includeHidden,
     limit,
     offset
   } = parsed.data;
@@ -709,6 +1030,18 @@ app.get('/v1/events/search', async (req, res) => {
 
   await syncLocalEventsToCanonical();
   await maybeTriggerIngestion(city || INGESTION_DEFAULT_CITY, fromDate, toDate);
+
+  let userId = null;
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    try {
+      const payload = jwt.verify(authHeader.slice(7), JWT_SECRET);
+      userId = payload?.user_id || null;
+    } catch {
+      userId = null;
+    }
+  }
+  const allowHidden = includeHidden === 'true' || includeHidden === '1';
 
   const where = [];
   const params = [];
@@ -739,9 +1072,32 @@ app.get('/v1/events/search', async (req, res) => {
     });
   }
 
+  if (q) {
+    const keyword = `%${q.toLowerCase()}%`;
+    where.push('(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(venue_name) LIKE ?)');
+    params.push(keyword, keyword, keyword);
+  }
+
+  if (artist) {
+    const keyword = `%${artist.toLowerCase()}%`;
+    where.push('(LOWER(title) LIKE ? OR JSON_SEARCH(tags, \"one\", ?) IS NOT NULL)');
+    params.push(keyword, normalizeToken(artist));
+  }
+
+  if (venue) {
+    const keyword = `%${venue.toLowerCase()}%`;
+    where.push('LOWER(venue_name) LIKE ?');
+    params.push(keyword);
+  }
+
   if (source) {
     where.push('EXISTS (SELECT 1 FROM source_events se WHERE se.event_id = events.id AND se.source = ?)');
     params.push(source);
+  }
+
+  if (userId && !allowHidden) {
+    where.push('events.id NOT IN (SELECT event_id FROM user_hidden_events WHERE user_id = ?)');
+    params.push(userId);
   }
 
   const parsedLimit = Number.parseInt(limit || '50', 10);
@@ -773,15 +1129,8 @@ app.get('/v1/events/search', async (req, res) => {
   let ranked = false;
   let scoresByEvent = new Map();
 
-  let userId = null;
-  const authHeader = req.headers.authorization || '';
-  if (authHeader.startsWith('Bearer ')) {
-    try {
-      const payload = jwt.verify(authHeader.slice(7), JWT_SECRET);
-      userId = payload?.user_id || null;
-    } catch {
-      userId = null;
-    }
+  if (userId) {
+    void maybeTriggerBandsintownForUser(userId, city || INGESTION_DEFAULT_CITY, fromDate, toDate);
   }
 
   if (userId && (rank === 'personalized' || rank === undefined)) {
@@ -820,6 +1169,143 @@ app.get('/v1/events/search', async (req, res) => {
   return res.json({ events, count: events.length, ranked });
 });
 
+app.get('/v1/performers', async (req, res) => {
+  const schema = z.object({
+    city: z.string().optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+    q: z.string().optional(),
+    include: z.string().optional(),
+    limit: z.string().optional()
+  });
+  const parsed = schema.safeParse(req.query);
+  if (!parsed.success) {
+    return sendError(res, 400, 'invalid_query', 'Invalid query parameters', parsed.error.flatten());
+  }
+
+  const {
+    city,
+    from,
+    to,
+    q,
+    include,
+    limit
+  } = parsed.data;
+
+  const includeSet = new Set(
+    (include ? include.split(',') : ['local', 'ticketmaster', 'spotify'])
+      .map(item => normalizeToken(item))
+      .filter(Boolean)
+  );
+
+  const fromDate = parseDateParam(from, new Date());
+  const toDate = parseDateParam(to, new Date(Date.now() + 90 * 24 * 60 * 60 * 1000));
+  const limitValue = Math.min(Number.parseInt(limit || '200', 10) || 200, 500);
+  const keyword = q ? normalizeToken(q) : '';
+
+  const performers = [];
+
+  if (includeSet.has('local')) {
+    const params = [];
+    let whereSql = '';
+    if (city) {
+      whereSql = 'WHERE LOWER(city) LIKE ?';
+      params.push(`%${city.toLowerCase()}%`);
+    }
+    const [rows] = await pool.query(
+      `SELECT dj_name, genres, city, instagram, soundcloud, numeric_fee, currency FROM djs ${whereSql} LIMIT ?`,
+      [...params, limitValue]
+    );
+    rows.forEach(row => {
+      if (!row.dj_name) return;
+      performers.push({
+        name: row.dj_name,
+        source: 'local',
+        city: row.city || null,
+        genres: row.genres || null,
+        instagram: row.instagram || null,
+        soundcloud: row.soundcloud || null,
+        fee: row.numeric_fee === null ? null : Number(row.numeric_fee),
+        currency: row.currency || 'EUR'
+      });
+    });
+  }
+
+  if (includeSet.has('ticketmaster')) {
+    const params = [
+      fromDate.toISOString().slice(0, 19).replace('T', ' '),
+      toDate.toISOString().slice(0, 19).replace('T', ' ')
+    ];
+    let whereSql = 'WHERE se.source = ? AND e.start_time >= ? AND e.start_time <= ?';
+    params.unshift('ticketmaster');
+    if (city) {
+      whereSql += ' AND LOWER(e.city) = LOWER(?)';
+      params.push(city);
+    }
+    const [rows] = await pool.query(
+      `SELECT se.raw_payload
+       FROM source_events se
+       JOIN events e ON e.id = se.event_id
+       ${whereSql}
+       LIMIT ?`,
+      [...params, limitValue]
+    );
+    rows.forEach(row => {
+      const payload = parseJson(row.raw_payload, null);
+      const attractions = payload?._embedded?.attractions || [];
+      attractions.forEach(attraction => {
+        const name = attraction?.name;
+        if (!name) return;
+        performers.push({
+          name,
+          source: 'ticketmaster'
+        });
+      });
+    });
+  }
+
+  if (includeSet.has('spotify')) {
+    const authHeader = req.headers.authorization || '';
+    if (authHeader.startsWith('Bearer ')) {
+      try {
+        const payload = jwt.verify(authHeader.slice(7), JWT_SECRET);
+        const userId = payload?.user_id;
+        if (userId) {
+          const [rows] = await pool.query(
+            'SELECT top_artists FROM user_spotify WHERE user_id = ?',
+            [userId]
+          );
+          const artists = rows.length ? parseJson(rows[0].top_artists, []) : [];
+          artists.forEach(item => {
+            const name = typeof item === 'string' ? item : (item?.name || '');
+            if (!name) return;
+            performers.push({
+              name,
+              source: 'spotify',
+              spotify_id: typeof item === 'object' ? item?.id || null : null,
+              genres: typeof item === 'object' ? item?.genres || null : null
+            });
+          });
+        }
+      } catch {
+        // Ignore invalid token for this optional path
+      }
+    }
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  performers.forEach(item => {
+    const key = normalizeToken(item.name);
+    if (!key || seen.has(key)) return;
+    if (keyword && !key.includes(keyword)) return;
+    seen.add(key);
+    deduped.push(item);
+  });
+
+  return res.json({ performers: deduped, count: deduped.length });
+});
+
 app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
   const schema = z.object({
     city: z.string().optional(),
@@ -844,6 +1330,7 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
 
   await syncLocalEventsToCanonical();
   await maybeTriggerIngestion(city || INGESTION_DEFAULT_CITY, fromDate, toDate);
+  void maybeTriggerBandsintownForUser(userId, city || INGESTION_DEFAULT_CITY, fromDate, toDate);
   const signals = await getUserSignals(userId);
 
   const where = [];
@@ -862,6 +1349,9 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
     where.push(`LOWER(city) IN (${placeholders})`);
     params.push(...signals.preferredCities);
   }
+
+  where.push('events.id NOT IN (SELECT event_id FROM user_hidden_events WHERE user_id = ?)');
+  params.push(userId);
 
   const parsedLimit = Number.parseInt(limit || '50', 10);
   const limitValue = Number.isNaN(parsedLimit) ? 50 : Math.min(parsedLimit, 200);
@@ -914,6 +1404,191 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
   return res.json({ events, count: events.length });
 });
 
+const alertSchema = z.object({
+  artist_name: z.string().min(1),
+  city: z.string().optional(),
+  radius_km: z.coerce.number().int().positive().optional()
+});
+
+app.post('/v1/alerts', requireAuth, async (req, res) => {
+  const parsed = alertSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, 'invalid_body', 'Invalid request body', parsed.error.flatten());
+  }
+  const { artist_name, city, radius_km } = parsed.data;
+  const [result] = await pool.execute(
+    `INSERT INTO user_alerts (user_id, artist_name, city, radius_km)
+     VALUES (?, ?, ?, ?)`,
+    [req.user.user_id, artist_name, city || null, radius_km ?? null]
+  );
+  const [rows] = await pool.query('SELECT * FROM user_alerts WHERE id = ?', [result.insertId]);
+  return res.status(201).json({ alert: rows[0] });
+});
+
+app.get('/v1/alerts', requireAuth, async (req, res) => {
+  const [rows] = await pool.query(
+    'SELECT * FROM user_alerts WHERE user_id = ? ORDER BY created_at DESC',
+    [req.user.user_id]
+  );
+  return res.json({ alerts: rows });
+});
+
+app.delete('/v1/alerts/:id', requireAuth, async (req, res) => {
+  const alertId = parseIdParam(req.params.id);
+  if (alertId === null) {
+    return sendError(res, 400, 'invalid_id', 'Invalid alert id');
+  }
+  const [rows] = await pool.query(
+    'SELECT * FROM user_alerts WHERE id = ? AND user_id = ?',
+    [alertId, req.user.user_id]
+  );
+  if (rows.length === 0) {
+    return sendError(res, 404, 'not_found', 'Alert not found');
+  }
+  await pool.execute('DELETE FROM user_alerts WHERE id = ?', [alertId]);
+  return res.json({ deleted: true });
+});
+
+app.get('/v1/alerts/notifications', requireAuth, async (req, res) => {
+  const userId = req.user.user_id;
+  const [alerts] = await pool.query(
+    'SELECT * FROM user_alerts WHERE user_id = ? ORDER BY created_at DESC',
+    [userId]
+  );
+  const now = new Date();
+  const fallbackStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const payload = [];
+
+  for (const alert of alerts) {
+    const since = alert.last_notified_at ? new Date(alert.last_notified_at) : fallbackStart;
+    const params = [];
+    const where = ['created_at >= ?'];
+    params.push(since.toISOString().slice(0, 19).replace('T', ' '));
+
+    if (alert.city) {
+      where.push('LOWER(city) = LOWER(?)');
+      params.push(alert.city);
+    }
+
+    const artistToken = normalizeToken(alert.artist_name);
+    if (artistToken) {
+      where.push('(LOWER(title) LIKE ? OR JSON_SEARCH(tags, \"one\", ?) IS NOT NULL)');
+      params.push(`%${artistToken}%`, artistToken);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const [rows] = await pool.query(
+      `SELECT * FROM events ${whereSql} ORDER BY start_time ASC LIMIT 200`,
+      params
+    );
+
+    const eventIds = rows.map(row => row.id);
+    let sourcesByEvent = new Map();
+    if (eventIds.length > 0) {
+      const [sourceRows] = await pool.query(
+        `SELECT event_id, source, source_id FROM source_events WHERE event_id IN (${eventIds.map(() => '?').join(',')})`,
+        eventIds
+      );
+      sourcesByEvent = sourceRows.reduce((acc, row) => {
+        const entry = acc.get(row.event_id) || [];
+        entry.push({ source: row.source, source_id: row.source_id });
+        acc.set(row.event_id, entry);
+        return acc;
+      }, new Map());
+    }
+
+    if (rows.length > 0) {
+      await pool.execute(
+        'UPDATE user_alerts SET last_notified_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [alert.id]
+      );
+    }
+
+    payload.push({
+      alert,
+      events: rows.map(row => buildEventResponse(row, sourcesByEvent.get(row.id) || []))
+    });
+  }
+
+  return res.json({ alerts: payload });
+});
+
+app.get('/v1/events/:id/calendar', async (req, res) => {
+  const eventId = parseIdParam(req.params.id);
+  if (eventId === null) {
+    return sendError(res, 400, 'invalid_id', 'Invalid event id');
+  }
+  const [rows] = await pool.query('SELECT * FROM events WHERE id = ?', [eventId]);
+  if (rows.length === 0) {
+    return sendError(res, 404, 'not_found', 'Event not found');
+  }
+  const calendar = buildCalendarFile([rows[0]]);
+  res.set('Content-Type', 'text/calendar; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename=\"event-${eventId}.ics\"`);
+  return res.send(calendar);
+});
+
+app.get('/v1/users/me/calendar', async (req, res) => {
+  const token = getTokenFromRequest(req);
+  if (!token) {
+    return sendError(res, 401, 'unauthorized', 'Missing bearer token');
+  }
+  let payload;
+  try {
+    payload = jwt.verify(token, JWT_SECRET);
+  } catch {
+    return sendError(res, 401, 'unauthorized', 'Invalid token');
+  }
+  const userId = payload?.user_id;
+  if (!userId) {
+    return sendError(res, 401, 'unauthorized', 'Invalid token');
+  }
+  const [rows] = await pool.query(
+    `SELECT e.*
+     FROM user_saved_events se
+     JOIN events e ON e.id = se.event_id
+     WHERE se.user_id = ?
+     ORDER BY e.start_time ASC`,
+    [userId]
+  );
+  const calendar = buildCalendarFile(rows);
+  res.set('Content-Type', 'text/calendar; charset=utf-8');
+  res.set('Content-Disposition', 'attachment; filename=\"whatsthecraic-saved-events.ics\"');
+  return res.send(calendar);
+});
+
+app.get('/v1/users/me/saved', requireAuth, async (req, res) => {
+  const userId = req.user?.user_id;
+  if (!userId) {
+    return sendError(res, 401, 'unauthorized', 'Invalid user token');
+  }
+  const [rows] = await pool.query(
+    `SELECT e.*
+     FROM user_saved_events se
+     JOIN events e ON e.id = se.event_id
+     WHERE se.user_id = ?
+     ORDER BY se.saved_at DESC`,
+    [userId]
+  );
+  const eventIds = rows.map(row => row.id);
+  let sourcesByEvent = new Map();
+  if (eventIds.length > 0) {
+    const [sourceRows] = await pool.query(
+      `SELECT event_id, source, source_id FROM source_events WHERE event_id IN (${eventIds.map(() => '?').join(',')})`,
+      eventIds
+    );
+    sourcesByEvent = sourceRows.reduce((acc, row) => {
+      const entry = acc.get(row.event_id) || [];
+      entry.push({ source: row.source, source_id: row.source_id });
+      acc.set(row.event_id, entry);
+      return acc;
+    }, new Map());
+  }
+  const events = rows.map(row => buildEventResponse(row, sourcesByEvent.get(row.id) || []));
+  return res.json({ events, count: events.length });
+});
+
 const planSchema = z.object({
   name: z.string().min(1),
   city: z.string().optional(),
@@ -928,6 +1603,31 @@ const planSchema = z.object({
 });
 
 const planUpdateSchema = planSchema.partial();
+
+const CONTACT_TEMPLATES = [
+  {
+    id: 'dj-booking',
+    label: 'DJ booking request',
+    body: 'Hi {{recipient_name}},\n\nI’m {{organizer_name}} with {{organizer_org}}. We’re planning {{plan_name}} in {{city}} on {{date_range}} with a budget of {{budget_range}}. Would you be available?'
+  },
+  {
+    id: 'venue-inquiry',
+    label: 'Venue availability inquiry',
+    body: 'Hi {{recipient_name}},\n\nI’m {{organizer_name}} and I’m looking to host {{plan_name}} in {{city}} on {{date_range}} for ~{{capacity}} guests. Are you available and what are your terms?'
+  },
+  {
+    id: 'follow-up',
+    label: 'Follow up',
+    body: 'Hello {{recipient_name}},\n\nFollowing up on my previous message about {{plan_name}} in {{city}}. Happy to share more details if needed.'
+  }
+];
+
+const renderTemplate = (template, vars) => {
+  return template.replace(/\{\{([^}]+)\}\}/g, (_, key) => {
+    const normalized = key.trim();
+    return vars[normalized] ?? '';
+  });
+};
 
 app.post('/v1/organizer/plans', requireAuth, requireOrganizer, async (req, res) => {
   const parsed = planSchema.safeParse(req.body);
@@ -1184,15 +1884,7 @@ app.post('/v1/organizer/plans/:id/shortlist', requireAuth, requireOrganizer, asy
   return res.status(201).json({ saved: true });
 });
 
-app.get('/v1/organizer/plans/:id/shortlist', requireAuth, requireOrganizer, async (req, res) => {
-  const planId = parseIdParam(req.params.id);
-  if (planId === null) {
-    return sendError(res, 400, 'invalid_id', 'Invalid plan id');
-  }
-  const plan = await fetchPlanById(planId, req.user.user_id);
-  if (!plan) {
-    return sendError(res, 404, 'not_found', 'Plan not found');
-  }
+const fetchShortlistItems = async (planId) => {
   const [rows] = await pool.query(
     'SELECT item_type, item_id, created_at FROM event_plan_shortlists WHERE plan_id = ? ORDER BY created_at DESC',
     [planId]
@@ -1221,13 +1913,70 @@ app.get('/v1/organizer/plans/:id/shortlist', requireAuth, requireOrganizer, asyn
       return acc;
     }, {});
   }
-  const items = rows.map(row => ({
+  return rows.map(row => ({
     item_type: row.item_type,
     item_id: row.item_id,
     created_at: row.created_at,
     item: row.item_type === 'dj' ? djsById[row.item_id] : venuesById[row.item_id]
   }));
+};
+
+app.get('/v1/organizer/plans/:id/shortlist', requireAuth, requireOrganizer, async (req, res) => {
+  const planId = parseIdParam(req.params.id);
+  if (planId === null) {
+    return sendError(res, 400, 'invalid_id', 'Invalid plan id');
+  }
+  const plan = await fetchPlanById(planId, req.user.user_id);
+  if (!plan) {
+    return sendError(res, 404, 'not_found', 'Plan not found');
+  }
+  const items = await fetchShortlistItems(planId);
   return res.json({ plan_id: planId, items });
+});
+
+app.get('/v1/organizer/plans/:id/shortlist/export', requireAuth, requireOrganizer, async (req, res) => {
+  const planId = parseIdParam(req.params.id);
+  if (planId === null) {
+    return sendError(res, 400, 'invalid_id', 'Invalid plan id');
+  }
+  const plan = await fetchPlanById(planId, req.user.user_id);
+  if (!plan) {
+    return sendError(res, 404, 'not_found', 'Plan not found');
+  }
+  const format = (req.query.format || 'csv').toString().toLowerCase();
+  const items = await fetchShortlistItems(planId);
+
+  if (format === 'json') {
+    return res.json({ plan_id: planId, items });
+  }
+
+  const header = ['item_type', 'item_id', 'name', 'city_or_address', 'genres', 'contact'];
+  const lines = [header.join(',')];
+  items.forEach(entry => {
+    const item = entry.item || {};
+    const name = entry.item_type === 'dj' ? item.dj_name : item.name;
+    const cityOrAddress = entry.item_type === 'dj' ? item.city : item.address;
+    const genres = entry.item_type === 'dj' ? item.genres : item.genreFocus;
+    const contact = entry.item_type === 'dj'
+      ? [item.email, item.instagram, item.phone].filter(Boolean).join(' | ')
+      : item.notes || '';
+    const row = [
+      entry.item_type,
+      entry.item_id,
+      name || '',
+      cityOrAddress || '',
+      genres || '',
+      contact || ''
+    ].map(value => `"${String(value).replace(/"/g, '""')}"`);
+    lines.push(row.join(','));
+  });
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename=\"shortlist-${planId}.csv\"`);
+  return res.send(lines.join('\n'));
+});
+
+app.get('/v1/organizer/contact-templates', requireAuth, requireOrganizer, async (req, res) => {
+  return res.json({ templates: CONTACT_TEMPLATES });
 });
 
 app.post('/v1/organizer/contact-requests', requireAuth, requireOrganizer, async (req, res) => {
@@ -1235,7 +1984,9 @@ app.post('/v1/organizer/contact-requests', requireAuth, requireOrganizer, async 
     plan_id: z.coerce.number().int().positive().optional(),
     item_type: z.enum(['dj', 'venue']),
     item_id: z.coerce.number().int().positive(),
-    message: z.string().min(1)
+    message: z.string().optional(),
+    template_id: z.string().optional(),
+    template_vars: z.record(z.string()).optional()
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -1248,10 +1999,47 @@ app.post('/v1/organizer/contact-requests', requireAuth, requireOrganizer, async 
       return sendError(res, 404, 'not_found', 'Plan not found');
     }
   }
+  let message = parsed.data.message;
+  if (!message && parsed.data.template_id) {
+    const template = CONTACT_TEMPLATES.find(t => t.id === parsed.data.template_id);
+    if (!template) {
+      return sendError(res, 400, 'invalid_template', 'Template not found');
+    }
+    let organizerName = '';
+    try {
+      const [userRows] = await pool.query('SELECT name FROM users WHERE id = ?', [req.user.user_id]);
+      organizerName = userRows.length ? userRows[0].name : '';
+    } catch {
+      organizerName = '';
+    }
+    let plan = null;
+    if (planId) {
+      plan = await fetchPlanById(planId, req.user.user_id);
+    }
+    const vars = {
+      organizer_name: organizerName || 'Organizer',
+      organizer_org: '',
+      plan_name: plan?.name || 'your event',
+      city: plan?.city || '',
+      date_range: [plan?.start_date, plan?.end_date].filter(Boolean).join(' - '),
+      budget_range: plan?.budget_min || plan?.budget_max
+        ? `${plan?.budget_min || ''} - ${plan?.budget_max || ''}`.trim()
+        : '',
+      capacity: plan?.capacity ? String(plan.capacity) : '',
+      recipient_name: '',
+      item_type: parsed.data.item_type,
+      item_id: String(parsed.data.item_id)
+    };
+    const mergedVars = { ...vars, ...(parsed.data.template_vars || {}) };
+    message = renderTemplate(template.body, mergedVars);
+  }
+  if (!message || !message.trim()) {
+    return sendError(res, 400, 'invalid_body', 'Message is required');
+  }
   const [result] = await pool.execute(
     `INSERT INTO contact_requests (user_id, plan_id, item_type, item_id, message)
      VALUES (?, ?, ?, ?, ?)`,
-    [req.user.user_id, planId, parsed.data.item_type, parsed.data.item_id, parsed.data.message]
+    [req.user.user_id, planId, parsed.data.item_type, parsed.data.item_id, message]
   );
   return res.status(201).json({ requested: true, id: result.insertId });
 });
@@ -1299,6 +2087,77 @@ app.post('/v1/events/:id/save', requireAuth, async (req, res) => {
   return res.status(200).json({ saved: true, event_id: eventId });
 });
 
+app.post('/v1/events/:id/hide', requireAuth, async (req, res) => {
+  const eventId = parseIdParam(req.params.id);
+  if (eventId === null) {
+    return sendError(res, 400, 'invalid_id', 'Invalid event id');
+  }
+  const userId = req.user?.user_id;
+  if (!userId) {
+    return sendError(res, 401, 'unauthorized', 'Invalid user token');
+  }
+  const [rows] = await pool.query('SELECT id FROM events WHERE id = ?', [eventId]);
+  if (rows.length === 0) {
+    return sendError(res, 404, 'not_found', 'Event not found');
+  }
+  await pool.execute(
+    `INSERT INTO user_hidden_events (user_id, event_id)
+     VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE hidden_at = CURRENT_TIMESTAMP`,
+    [userId, eventId]
+  );
+  return res.status(200).json({ hidden: true, event_id: eventId });
+});
+
+app.delete('/v1/events/:id/hide', requireAuth, async (req, res) => {
+  const eventId = parseIdParam(req.params.id);
+  if (eventId === null) {
+    return sendError(res, 400, 'invalid_id', 'Invalid event id');
+  }
+  const userId = req.user?.user_id;
+  if (!userId) {
+    return sendError(res, 401, 'unauthorized', 'Invalid user token');
+  }
+  await pool.execute(
+    'DELETE FROM user_hidden_events WHERE user_id = ? AND event_id = ?',
+    [userId, eventId]
+  );
+  return res.status(200).json({ hidden: false, event_id: eventId });
+});
+
+app.get('/v1/users/me/hidden', requireAuth, async (req, res) => {
+  const userId = req.user?.user_id;
+  if (!userId) {
+    return sendError(res, 401, 'unauthorized', 'Invalid user token');
+  }
+  const [rows] = await pool.query(
+    `SELECT e.*
+     FROM user_hidden_events uh
+     JOIN events e ON e.id = uh.event_id
+     WHERE uh.user_id = ?
+     ORDER BY uh.hidden_at DESC`,
+    [userId]
+  );
+
+  const eventIds = rows.map(row => row.id);
+  let sourcesByEvent = new Map();
+  if (eventIds.length > 0) {
+    const [sourceRows] = await pool.query(
+      `SELECT event_id, source, source_id FROM source_events WHERE event_id IN (${eventIds.map(() => '?').join(',')})`,
+      eventIds
+    );
+    sourcesByEvent = sourceRows.reduce((acc, row) => {
+      const entry = acc.get(row.event_id) || [];
+      entry.push({ source: row.source, source_id: row.source_id });
+      acc.set(row.event_id, entry);
+      return acc;
+    }, new Map());
+  }
+
+  const events = rows.map(row => buildEventResponse(row, sourcesByEvent.get(row.id) || []));
+  return res.json({ events, count: events.length });
+});
+
 if (INGESTION_ENABLED) {
   const runScheduledIngestion = async () => {
     const now = new Date();
@@ -1306,12 +2165,17 @@ if (INGESTION_ENABLED) {
     const end = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
     await triggerIngestion('ticketmaster', INGESTION_DEFAULT_CITY, start, end);
     await triggerIngestion('eventbrite', INGESTION_DEFAULT_CITY, start, end);
-    await triggerIngestion('xraves', INGESTION_DEFAULT_CITY, start, end);
+    await triggerIngestion('bandsintown', INGESTION_DEFAULT_CITY, start, end);
+    await triggerIngestion('dice', INGESTION_DEFAULT_CITY, start, end);
   };
   runScheduledIngestion();
   setInterval(runScheduledIngestion, INGESTION_STALE_HOURS * 60 * 60 * 1000);
 }
 
-app.listen(API_PORT, () => {
-  console.log(`Local Events Service running on port ${API_PORT}`);
-});
+if (require.main === module) {
+  app.listen(API_PORT, () => {
+    console.log(`${SERVICE_NAME} listening on port ${API_PORT}`);
+  });
+}
+
+module.exports = { app, pool };

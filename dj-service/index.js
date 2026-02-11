@@ -12,6 +12,7 @@ const DB_USER = process.env.DB_USER || 'app';
 const DB_PASSWORD = process.env.DB_PASSWORD || 'app';
 const DB_NAME = process.env.DB_NAME || 'gigsdb';
 const API_PORT = process.env.API_PORT || process.env.DJ_SERVICE_PORT || 4002;
+const SERVICE_NAME = 'dj-service';
 
 // Create a connection pool
 const pool = mysql.createPool({
@@ -49,7 +50,16 @@ app.use((req, res, next) => {
     metrics.requests += 1;
     metrics.totalDurationMs += durationMs;
     metrics.statusCodes[res.statusCode] = (metrics.statusCodes[res.statusCode] || 0) + 1;
-    console.log(`[${requestId}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
+    console.log(JSON.stringify({
+      level: 'info',
+      service: SERVICE_NAME,
+      request_id: requestId,
+      method: req.method,
+      path: req.originalUrl,
+      status: res.statusCode,
+      duration_ms: durationMs,
+      timestamp: new Date().toISOString()
+    }));
   });
   next();
 });
@@ -63,6 +73,22 @@ if (process.env.TRUST_PROXY === 'true') {
   app.set('trust proxy', 1);
 }
 
+const warnOnMissingEnv = () => {
+  const missing = [];
+  if (!DB_HOST) missing.push('DB_HOST');
+  if (!DB_USER) missing.push('DB_USER');
+  if (!DB_PASSWORD) missing.push('DB_PASSWORD');
+  if (!DB_NAME) missing.push('DB_NAME');
+  if (!missing.length) return;
+  const message = `[${SERVICE_NAME}] Missing required env: ${missing.join(', ')}`;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(message);
+  }
+  console.warn(message);
+};
+
+warnOnMissingEnv();
+
 const rateLimiter = rateLimit({
   windowMs: parseIntOrDefault(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
   max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 120),
@@ -70,7 +96,9 @@ const rateLimiter = rateLimit({
   legacyHeaders: false
 });
 
-app.use(rateLimiter);
+if (process.env.NODE_ENV !== 'test') {
+  app.use(rateLimiter);
+}
 
 app.get('/metrics', (req, res) => {
   const uptimeSeconds = Math.floor((Date.now() - metrics.startTime) / 1000);
@@ -116,6 +144,89 @@ app.get('/djs', async (req, res) => {
   } catch (err) {
     console.error('Error fetching DJs:', err);
     return sendError(res, 500, 'internal_error', 'Failed to fetch DJs');
+  }
+});
+
+/**
+ * GET /v1/djs/search
+ * Search DJs with filters
+ */
+app.get('/v1/djs/search', async (req, res) => {
+  const schema = z.object({
+    q: z.string().optional(),
+    city: z.string().optional(),
+    genres: z.string().optional(),
+    feeMin: z.string().optional(),
+    feeMax: z.string().optional(),
+    currency: z.string().optional(),
+    limit: z.string().optional(),
+    offset: z.string().optional()
+  });
+  const parsed = schema.safeParse(req.query);
+  if (!parsed.success) {
+    return sendError(res, 400, 'invalid_query', 'Invalid query parameters', parsed.error.flatten());
+  }
+
+  const { q, city, genres, feeMin, feeMax, currency, limit, offset } = parsed.data;
+  const where = [];
+  const params = [];
+
+  if (q) {
+    const keyword = `%${q.toLowerCase()}%`;
+    where.push('(LOWER(dj_name) LIKE ? OR LOWER(instagram) LIKE ? OR LOWER(email) LIKE ?)');
+    params.push(keyword, keyword, keyword);
+  }
+
+  if (city) {
+    where.push('LOWER(city) LIKE ?');
+    params.push(`%${city.toLowerCase()}%`);
+  }
+
+  if (genres) {
+    const list = genres.split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
+    if (list.length) {
+      const clause = list.map(() => 'LOWER(genres) LIKE ?').join(' OR ');
+      where.push(`(${clause})`);
+      list.forEach(genre => params.push(`%${genre}%`));
+    }
+  }
+
+  if (feeMin) {
+    const min = Number.parseFloat(feeMin);
+    if (!Number.isNaN(min)) {
+      where.push('numeric_fee >= ?');
+      params.push(min);
+    }
+  }
+
+  if (feeMax) {
+    const max = Number.parseFloat(feeMax);
+    if (!Number.isNaN(max)) {
+      where.push('numeric_fee <= ?');
+      params.push(max);
+    }
+  }
+
+  if (currency) {
+    where.push('UPPER(currency) = UPPER(?)');
+    params.push(currency);
+  }
+
+  const parsedLimit = Number.parseInt(limit || '100', 10);
+  const limitValue = Number.isNaN(parsedLimit) ? 100 : Math.min(parsedLimit, 500);
+  const parsedOffset = Number.parseInt(offset || '0', 10);
+  const offsetValue = Number.isNaN(parsedOffset) ? 0 : Math.max(parsedOffset, 0);
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  try {
+    const [rows] = await pool.query(
+      `SELECT * FROM djs ${whereSql} ORDER BY dj_name ASC LIMIT ? OFFSET ?`,
+      [...params, limitValue, offsetValue]
+    );
+    res.json({ djs: rows, count: rows.length });
+  } catch (err) {
+    console.error('Error searching DJs:', err);
+    return sendError(res, 500, 'internal_error', 'Failed to search DJs');
   }
 });
 
@@ -373,6 +484,10 @@ app.get('/djs/:dj_id/fee-in-eur', async (req, res) => {
   }
 });
 
-app.listen(API_PORT, () => {
-  console.log(`DJ Service running on port ${API_PORT}`);
-});
+if (require.main === module) {
+  app.listen(API_PORT, () => {
+    console.log(`${SERVICE_NAME} listening on port ${API_PORT}`);
+  });
+}
+
+module.exports = { app, pool };

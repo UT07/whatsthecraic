@@ -8,12 +8,14 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 app.use(express.json());
 
+const SERVICE_NAME = 'aggregator-service';
+
 const corsOrigin = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(v => v.trim())
   : '*';
 app.use(cors({
   origin: corsOrigin,
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: false
 }));
 
@@ -34,7 +36,16 @@ app.use((req, res, next) => {
     metrics.requests += 1;
     metrics.totalDurationMs += durationMs;
     metrics.statusCodes[res.statusCode] = (metrics.statusCodes[res.statusCode] || 0) + 1;
-    console.log(`[${requestId}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
+    console.log(JSON.stringify({
+      level: 'info',
+      service: SERVICE_NAME,
+      request_id: requestId,
+      method: req.method,
+      path: req.originalUrl,
+      status: res.statusCode,
+      duration_ms: durationMs,
+      timestamp: new Date().toISOString()
+    }));
   });
   next();
 });
@@ -55,13 +66,31 @@ const rateLimiter = rateLimit({
   legacyHeaders: false
 });
 
-app.use(rateLimiter);
+if (process.env.NODE_ENV !== 'test') {
+  app.use(rateLimiter);
+}
 
 const PORT = process.env.PORT || process.env.AGGREGATOR_PORT || 4000;
 const TICKETMASTER_API_KEY = process.env.TICKETMASTER_API_KEY;
 const VENUE_SERVICE_URL = process.env.VENUE_SERVICE_URL || 'http://venue-service:4001';
 const DJ_SERVICE_URL = process.env.DJ_SERVICE_URL || 'http://dj-service:4002';
 const LOCAL_EVENTS_URL = process.env.LOCAL_EVENTS_URL || 'http://events-service:4003';
+
+const warnOnMissingEnv = () => {
+  const warnings = [];
+  if (!VENUE_SERVICE_URL) warnings.push('VENUE_SERVICE_URL not set');
+  if (!DJ_SERVICE_URL) warnings.push('DJ_SERVICE_URL not set');
+  if (!LOCAL_EVENTS_URL) warnings.push('LOCAL_EVENTS_URL not set');
+  if (!TICKETMASTER_API_KEY) warnings.push('TICKETMASTER_API_KEY not set (Ticketmaster feed may be limited)');
+  if (!warnings.length) return;
+  const message = `[${SERVICE_NAME}] ${warnings.join(' | ')}`;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(message);
+  }
+  console.warn(message);
+};
+
+warnOnMissingEnv();
 
 const http = axios.create({ timeout: 8000 });
 
@@ -156,6 +185,22 @@ app.get('/v1/events/:id', async (req, res) => {
   }
 });
 
+app.get('/v1/events/:id/calendar', async (req, res) => {
+  try {
+    const response = await http.get(`${LOCAL_EVENTS_URL}/v1/events/${req.params.id}/calendar`, {
+      responseType: 'text'
+    });
+    res.set('Content-Type', response.headers['content-type'] || 'text/calendar; charset=utf-8');
+    if (response.headers['content-disposition']) {
+      res.set('Content-Disposition', response.headers['content-disposition']);
+    }
+    return res.status(response.status).send(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to fetch calendar');
+  }
+});
+
 app.post('/v1/events/:id/save', async (req, res) => {
   try {
     const response = await http.post(
@@ -170,6 +215,51 @@ app.post('/v1/events/:id/save', async (req, res) => {
   }
 });
 
+app.post('/v1/events/:id/hide', async (req, res) => {
+  try {
+    const response = await http.post(
+      `${LOCAL_EVENTS_URL}/v1/events/${req.params.id}/hide`,
+      {},
+      { headers: { Authorization: req.headers.authorization || '' } }
+    );
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to hide event');
+  }
+});
+
+app.delete('/v1/events/:id/hide', async (req, res) => {
+  try {
+    const response = await http.delete(
+      `${LOCAL_EVENTS_URL}/v1/events/${req.params.id}/hide`,
+      { headers: { Authorization: req.headers.authorization || '' } }
+    );
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to unhide event');
+  }
+});
+
+app.get('/v1/performers', async (req, res) => {
+  try {
+    const response = await http.get(
+      `${LOCAL_EVENTS_URL}/v1/performers`,
+      { params: req.query, headers: { Authorization: req.headers.authorization || '' } }
+    );
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to fetch performers');
+  }
+});
+
+app.get('/v1/alerts', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/alerts` }));
+app.post('/v1/alerts', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/alerts`, method: 'post' }));
+app.delete('/v1/alerts/:id', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/alerts/${req.params.id}`, method: 'delete' }));
+app.get('/v1/alerts/notifications', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/alerts/notifications` }));
+
 app.get('/v1/users/me/feed', async (req, res) => {
   try {
     const response = await http.get(
@@ -183,6 +273,91 @@ app.get('/v1/users/me/feed', async (req, res) => {
   }
 });
 
+app.get('/v1/users/me/saved', async (req, res) => {
+  try {
+    const response = await http.get(
+      `${LOCAL_EVENTS_URL}/v1/users/me/saved`,
+      { headers: { Authorization: req.headers.authorization || '' } }
+    );
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to fetch saved events');
+  }
+});
+
+app.get('/v1/users/me/hidden', async (req, res) => {
+  try {
+    const response = await http.get(
+      `${LOCAL_EVENTS_URL}/v1/users/me/hidden`,
+      { headers: { Authorization: req.headers.authorization || '' } }
+    );
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to fetch hidden events');
+  }
+});
+
+app.get('/v1/users/me/calendar', async (req, res) => {
+  try {
+    const response = await http.get(
+      `${LOCAL_EVENTS_URL}/v1/users/me/calendar`,
+      { params: req.query, headers: { Authorization: req.headers.authorization || '' }, responseType: 'text' }
+    );
+    res.set('Content-Type', response.headers['content-type'] || 'text/calendar; charset=utf-8');
+    if (response.headers['content-disposition']) {
+      res.set('Content-Disposition', response.headers['content-disposition']);
+    }
+    return res.status(response.status).send(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to fetch calendar');
+  }
+});
+
+app.get('/v1/organizer/plans', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/plans` }));
+app.post('/v1/organizer/plans', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/plans`, method: 'post' }));
+app.get('/v1/organizer/plans/:id', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/plans/${req.params.id}` }));
+app.put('/v1/organizer/plans/:id', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/plans/${req.params.id}`, method: 'put' }));
+app.post('/v1/organizer/plans/:id/search/djs', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/plans/${req.params.id}/search/djs`, method: 'post' }));
+app.post('/v1/organizer/plans/:id/search/venues', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/plans/${req.params.id}/search/venues`, method: 'post' }));
+app.post('/v1/organizer/plans/:id/shortlist', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/plans/${req.params.id}/shortlist`, method: 'post' }));
+app.get('/v1/organizer/plans/:id/shortlist', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/plans/${req.params.id}/shortlist` }));
+
+app.get('/v1/organizer/contact-templates', async (req, res) => {
+  try {
+    const response = await http.get(
+      `${LOCAL_EVENTS_URL}/v1/organizer/contact-templates`,
+      { headers: { Authorization: req.headers.authorization || '' } }
+    );
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to fetch contact templates');
+  }
+});
+
+app.post('/v1/organizer/contact-requests', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/contact-requests`, method: 'post' }));
+app.get('/v1/organizer/contact-requests', async (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/v1/organizer/contact-requests` }));
+
+app.get('/v1/organizer/plans/:id/shortlist/export', async (req, res) => {
+  try {
+    const response = await http.get(
+      `${LOCAL_EVENTS_URL}/v1/organizer/plans/${req.params.id}/shortlist/export`,
+      { params: req.query, headers: { Authorization: req.headers.authorization || '' }, responseType: 'text' }
+    );
+    res.set('Content-Type', response.headers['content-type'] || 'text/csv; charset=utf-8');
+    if (response.headers['content-disposition']) {
+      res.set('Content-Disposition', response.headers['content-disposition']);
+    }
+    return res.status(response.status).send(response.data);
+  } catch (error) {
+    const status = error.response?.status || 502;
+    return sendError(res, status, 'upstream_error', 'Failed to export shortlist');
+  }
+});
+
 app.get('/events', (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/events` }));
 app.get('/events/:id', (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/events/${req.params.id}` }));
 app.post('/events', (req, res) => proxyRequest(req, res, { url: `${LOCAL_EVENTS_URL}/events`, method: 'post' }));
@@ -191,12 +366,17 @@ app.delete('/events/:id', (req, res) => proxyRequest(req, res, { url: `${LOCAL_E
 
 app.get('/djs', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs` }));
 app.get('/djs/:dj_id', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs/${req.params.dj_id}` }));
+app.get('/v1/djs/search', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/v1/djs/search` }));
 app.post('/djs', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs`, method: 'post' }));
 app.put('/djs/:dj_id', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs/${req.params.dj_id}`, method: 'put' }));
 app.delete('/djs/:dj_id', (req, res) => proxyRequest(req, res, { url: `${DJ_SERVICE_URL}/djs/${req.params.dj_id}`, method: 'delete' }));
 
 app.get('/venues', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues` }));
 app.get('/venues/:id', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues/${req.params.id}` }));
+app.get('/v1/venues/search', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/v1/venues/search` }));
+app.get('/v1/venues/:id/availability', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/v1/venues/${req.params.id}/availability` }));
+app.post('/v1/venues/:id/availability', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/v1/venues/${req.params.id}/availability`, method: 'post' }));
+app.delete('/v1/venues/:id/availability/:availability_id', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/v1/venues/${req.params.id}/availability/${req.params.availability_id}`, method: 'delete' }));
 app.post('/venues', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues`, method: 'post' }));
 app.put('/venues/:id', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues/${req.params.id}`, method: 'put' }));
 app.delete('/venues/:id', (req, res) => proxyRequest(req, res, { url: `${VENUE_SERVICE_URL}/venues/${req.params.id}`, method: 'delete' }));
@@ -335,4 +515,8 @@ app.get('/api/gigs', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Aggregator running on port ${PORT}`));
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`${SERVICE_NAME} listening on port ${PORT}`));
+}
+
+module.exports = { app };

@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import DJs from './pages/DJs';
 import Venues from './pages/Venues';
 import CombinedGigs from './pages/CombinedGigs';
+import Organizer from './pages/Organizer';
+import Preferences from './pages/Preferences';
 import Login from './pages/Auth/Login';
 import Signup from './pages/Auth/Signup';
 import { getToken } from './services/apiClient';
@@ -47,6 +49,8 @@ const App = () => {
                 <Route path="/djs" element={<DJs />} />
                 <Route path="/venues" element={<Venues />} />
                 <Route path="/discover" element={<CombinedGigs />} />
+                <Route path="/organizer" element={<Organizer />} />
+                <Route path="/preferences" element={<Preferences />} />
                 <Route path="*" element={<Navigate to="/dashboard" />} />
               </>
             ) : (

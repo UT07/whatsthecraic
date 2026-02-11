@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist/
+coverage/
+**/node_modules/
+**/build/
+**/dist/
+**/coverage/
+
+# Generated or vendor
+xraves-scraper/

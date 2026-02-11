@@ -11,3 +11,16 @@ CREATE TABLE IF NOT EXISTS venues (
   longitude DECIMAL(9,6),
   notes TEXT
 );
+
+CREATE TABLE IF NOT EXISTS venue_availability (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  venue_id INT NOT NULL,
+  start_time DATETIME NOT NULL,
+  end_time DATETIME NOT NULL,
+  status VARCHAR(32) DEFAULT 'available',
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY venue_availability_venue_idx (venue_id),
+  CONSTRAINT fk_venue_availability_venue FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE
+);

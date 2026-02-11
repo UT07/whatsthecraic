@@ -6,6 +6,10 @@ const djAPI = {
     const response = await apiClient.get('/djs');
     return response.data;
   },
+  searchDJs: async (filters) => {
+    const response = await apiClient.get('/v1/djs/search', { params: filters });
+    return response.data;
+  },
   // Get one DJ by id
   getDJ: async (djId) => {
     const response = await apiClient.get(`/djs/${djId}`);

@@ -211,6 +211,46 @@ CREATE TABLE `user_saved_events` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `user_hidden_events`
+--
+
+DROP TABLE IF EXISTS `user_hidden_events`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `user_hidden_events` (
+  `user_id` int NOT NULL,
+  `event_id` int NOT NULL,
+  `hidden_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`user_id`, `event_id`),
+  KEY `user_hidden_events_event_idx` (`event_id`),
+  CONSTRAINT `fk_hidden_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_hidden_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for artist alerts
+--
+
+DROP TABLE IF EXISTS `user_alerts`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `user_alerts` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `artist_name` varchar(255) NOT NULL,
+  `city` varchar(100) DEFAULT NULL,
+  `radius_km` int DEFAULT NULL,
+  `last_notified_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `user_alerts_user_idx` (`user_id`),
+  CONSTRAINT `fk_user_alerts_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for organizer event plans
 --
 
@@ -308,7 +348,7 @@ CREATE TABLE `local_events` (
 
 LOCK TABLES `local_events` WRITE;
 /*!40000 ALTER TABLE `local_events` DISABLE KEYS */;
-INSERT INTO `local_events` VALUES (1,'Hard Techno Night w/ CHACHØU','Electronic','Dublin','2024-02-10','21:00:00','The Academy','https://mylocal.events/techno-chachou'),(2,'House & Tech Fest feat. ikigai3000','House','Cork','2024-03-05','20:00:00','Button Factory','https://mylocal.events/house_tech_fest'),(3,'Progressive Beats feat. Strukture','Electronic','Galway','2024-04-01','23:00:00','District 8','https://mylocal.events/progbeats_strukture'),(4,'Dub & Bass Rendezvous w/ Fizzy','Various','Dublin','2024-05-15','19:00:00','Workman\'s Club','https://mylocal.events/dub_bass_rendezvous'),(5,'Midnight Rave w/ Tech Noir','Techno','Dublin','2024-06-20','22:00:00','Wigwam','https://mylocal.events/midnight_techno'),(6,'Afrohouse Explosion feat. Mswenkocee','Electronic','Dublin','2024-07-12','21:00:00','Opium','https://mylocal.events/afro_explosion'),(7,'Sunset Tech Bash w/ Lørex','Techno','Galway','2024-08-08','20:00:00','The Grand Social','https://mylocal.events/sunset_lorex'),(8,'Deep House Session w/ Fizzy Waters','House','Cork','2024-09-10','21:30:00','Lucky\'s','https://mylocal.events/deephouse_fizzywaters'),(9,'Breaks & Bass w/ DJ haze','Various','Dublin','2024-10-15','19:30:00','Soundhouse','https://mylocal.events/breaks_bass_haze'),(10,'Melodic Techno Showcase w/ Ksara','Electronic','Dublin','2024-11-01','22:00:00','TheBackPage','https://mylocal.events/melodic_ksara'),(11,'Garage & Bass w/ Dj Gwada Mike','Various','Cork','2024-12-05','23:00:00','Fidelity','https://mylocal.events/garage_gwada'),(12,'Racket Rave w/ KIRSTY','Techno','Dublin','2025-01-10','21:00:00','Bernard Shaw/Racket','https://mylocal.events/racket_kirsty'),(13,'Deep Progressive House w/ RJ the DJ','House','Galway','2025-02-12','20:00:00','TheBigRomance','https://mylocal.events/deepprog_rj'),(14,'Acid & Hard Tech Marathon w/ Curley','Electronic','Dublin','2025-03-07','22:30:00','Grand social','https://mylocal.events/acid_curley'),(15,'Late-Night Bash w/ Ashanti Doran','Electronic','Dublin','2025-04-18','23:00:00','Cellar','https://mylocal.events/latenight_ashanti'),(16,'Hardgroove Invasion w/ Alp Bagci','Electronic','Dublin','2025-05-10','20:00:00','PYG','https://mylocal.events/hardgroove_alp'),(17,'Nu-Disco & House w/ Mswenkocee','House','Cork','2025-06-20','19:00:00','Pawn Shop','https://mylocal.events/nudisco_mswenkocee'),(18,'Peak Time Techno w/ Tech Noir','Techno','Dublin','2025-07-05','21:30:00','Izakaya/Tengu','https://mylocal.events/peaktime_noir'),(19,'DNB & Jungle w/ Fizzy Waters','Various','Galway','2025-08-11','22:00:00','Hen\'sTeeth','https://mylocal.events/dnb_fizzywaters'),(20,'Funky Beats w/ ikigai3000','Electronic','Dublin','2025-09-15','21:00:00','Lost Lane','https://mylocal.events/funky_ikigai3000');
+INSERT INTO `local_events` VALUES (1,'Hard Techno Night w/ CHACHØU','Electronic','Dublin','2026-02-10','21:00:00','The Academy','https://mylocal.events/techno-chachou'),(2,'House & Tech Fest feat. ikigai3000','House','Cork','2026-03-05','20:00:00','Button Factory','https://mylocal.events/house_tech_fest'),(3,'Progressive Beats feat. Strukture','Electronic','Galway','2026-04-01','23:00:00','District 8','https://mylocal.events/progbeats_strukture'),(4,'Dub & Bass Rendezvous w/ Fizzy','Various','Dublin','2026-05-15','19:00:00','Workman\'s Club','https://mylocal.events/dub_bass_rendezvous'),(5,'Midnight Rave w/ Tech Noir','Techno','Dublin','2026-06-20','22:00:00','Wigwam','https://mylocal.events/midnight_techno'),(6,'Afrohouse Explosion feat. Mswenkocee','Electronic','Dublin','2026-07-12','21:00:00','Opium','https://mylocal.events/afro_explosion'),(7,'Sunset Tech Bash w/ Lørex','Techno','Galway','2026-08-08','20:00:00','The Grand Social','https://mylocal.events/sunset_lorex'),(8,'Deep House Session w/ Fizzy Waters','House','Cork','2026-09-10','21:30:00','Lucky\'s','https://mylocal.events/deephouse_fizzywaters'),(9,'Breaks & Bass w/ DJ haze','Various','Dublin','2026-10-15','19:30:00','Soundhouse','https://mylocal.events/breaks_bass_haze'),(10,'Melodic Techno Showcase w/ Ksara','Electronic','Dublin','2026-11-01','22:00:00','TheBackPage','https://mylocal.events/melodic_ksara'),(11,'Garage & Bass w/ Dj Gwada Mike','Various','Cork','2026-12-05','23:00:00','Fidelity','https://mylocal.events/garage_gwada'),(12,'Racket Rave w/ KIRSTY','Techno','Dublin','2026-01-10','21:00:00','Bernard Shaw/Racket','https://mylocal.events/racket_kirsty'),(13,'Deep Progressive House w/ RJ the DJ','House','Galway','2026-02-12','20:00:00','TheBigRomance','https://mylocal.events/deepprog_rj'),(14,'Acid & Hard Tech Marathon w/ Curley','Electronic','Dublin','2026-03-07','22:30:00','Grand social','https://mylocal.events/acid_curley'),(15,'Late-Night Bash w/ Ashanti Doran','Electronic','Dublin','2026-04-18','23:00:00','Cellar','https://mylocal.events/latenight_ashanti'),(16,'Hardgroove Invasion w/ Alp Bagci','Electronic','Dublin','2026-05-10','20:00:00','PYG','https://mylocal.events/hardgroove_alp'),(17,'Nu-Disco & House w/ Mswenkocee','House','Cork','2026-06-20','19:00:00','Pawn Shop','https://mylocal.events/nudisco_mswenkocee'),(18,'Peak Time Techno w/ Tech Noir','Techno','Dublin','2026-07-05','21:30:00','Izakaya/Tengu','https://mylocal.events/peaktime_noir'),(19,'DNB & Jungle w/ Fizzy Waters','Various','Galway','2026-08-11','22:00:00','Hen\'sTeeth','https://mylocal.events/dnb_fizzywaters'),(20,'Funky Beats w/ ikigai3000','Electronic','Dublin','2026-09-15','21:00:00','Lost Lane','https://mylocal.events/funky_ikigai3000');
 /*!40000 ALTER TABLE `local_events` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -333,6 +373,28 @@ CREATE TABLE `venues` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for venue availability
+--
+
+DROP TABLE IF EXISTS `venue_availability`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `venue_availability` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `venue_id` int NOT NULL,
+  `start_time` datetime NOT NULL,
+  `end_time` datetime NOT NULL,
+  `status` varchar(32) DEFAULT 'available',
+  `notes` text,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `venue_availability_venue_idx` (`venue_id`),
+  CONSTRAINT `fk_venue_availability_venue` FOREIGN KEY (`venue_id`) REFERENCES `venues` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Dumping data for table `venues`
 --
 
@@ -351,4 +413,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-03-19 17:44:11
+-- Dump completed on 2026-03-19 17:44:11

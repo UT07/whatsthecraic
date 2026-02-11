@@ -1,5 +1,12 @@
 {
+  "scripts": {
+    "lint": "scripts/run-lint.sh",
+    "test:unit": "scripts/run-unit-tests.sh"
+  },
   "dependencies": {
     "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
   }
 }

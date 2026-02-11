@@ -1,21 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import djAPI from '../services/djAPI';
+import eventsAPI from '../services/eventsAPI';
 import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 
 const DJs = () => {
   const [djs, setDjs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingDJ, setEditingDJ] = useState(null);
+  const [performers, setPerformers] = useState([]);
+  const [performersLoading, setPerformersLoading] = useState(false);
+
+  const [filters, setFilters] = useState({
+    q: '',
+    city: '',
+    genres: '',
+    feeMax: ''
+  });
 
   const { register, handleSubmit, reset } = useForm();
 
-  const fetchDJs = async () => {
+  const fetchDJs = async (useSearch = false) => {
     try {
       setLoading(true);
-      const data = await djAPI.getAllDJs();
-      setDjs(data);
+      if (useSearch) {
+        const data = await djAPI.searchDJs(filters);
+        setDjs(data.djs || []);
+      } else {
+        const data = await djAPI.getAllDJs();
+        setDjs(data);
+      }
     } catch (error) {
       console.error("Error fetching DJs:", error);
     } finally {
@@ -26,6 +42,35 @@ const DJs = () => {
   useEffect(() => {
     fetchDJs();
   }, []);
+
+  const runSearch = async () => {
+    setSearching(true);
+    await fetchDJs(true);
+    setSearching(false);
+  };
+
+  const resetSearch = async () => {
+    setFilters({ q: '', city: '', genres: '', feeMax: '' });
+    await fetchDJs(false);
+  };
+
+  const loadPerformers = async () => {
+    setPerformersLoading(true);
+    try {
+      const data = await eventsAPI.getPerformers({
+        city: filters.city || undefined,
+        q: filters.q || undefined,
+        include: 'ticketmaster,spotify',
+        limit: 200
+      });
+      setPerformers(data.performers || []);
+    } catch (error) {
+      console.error('Error loading performers:', error);
+      setPerformers([]);
+    } finally {
+      setPerformersLoading(false);
+    }
+  };
 
   const openModal = (dj = null) => {
     setEditingDJ(dj);
@@ -91,6 +136,43 @@ const DJs = () => {
         </button>
       </div>
 
+      <div className="card grid gap-4 md:grid-cols-4">
+        <input
+          className="input"
+          placeholder="Search name"
+          value={filters.q}
+          onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+        />
+        <input
+          className="input"
+          placeholder="City"
+          value={filters.city}
+          onChange={(e) => setFilters({ ...filters, city: e.target.value })}
+        />
+        <input
+          className="input"
+          placeholder="Genres"
+          value={filters.genres}
+          onChange={(e) => setFilters({ ...filters, genres: e.target.value })}
+        />
+        <input
+          className="input"
+          type="number"
+          placeholder="Max fee"
+          value={filters.feeMax}
+          onChange={(e) => setFilters({ ...filters, feeMax: e.target.value })}
+        />
+        <div className="flex flex-wrap gap-2 md:col-span-4">
+          <button className="btn btn-primary" onClick={runSearch} disabled={searching}>
+            {searching ? 'Searching…' : 'Search DJs'}
+          </button>
+          <button className="btn btn-outline" onClick={resetSearch}>Reset</button>
+          <button className="btn btn-ghost" onClick={loadPerformers} disabled={performersLoading}>
+            {performersLoading ? 'Loading…' : 'Load Spotify/Ticketmaster performers'}
+          </button>
+        </div>
+      </div>
+
       <div className="grid-auto">
         {djs.map(dj => (
           <motion.div
@@ -119,6 +201,34 @@ const DJs = () => {
           </motion.div>
         ))}
       </div>
+
+      <section className="space-y-3">
+        <h2 className="section-title text-base">Discovered performers</h2>
+        {performersLoading ? (
+          <div className="card text-center text-muted">Loading performers…</div>
+        ) : performers.length === 0 ? (
+          <div className="card text-center text-muted">No additional performers yet.</div>
+        ) : (
+          <div className="grid-auto">
+            {performers.map((performer, index) => (
+              <motion.div
+                key={`${performer.name}-${index}`}
+                className="card flex flex-col gap-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-lg font-semibold">{performer.name}</h3>
+                  <span className="chip">{performer.source}</span>
+                </div>
+                {performer.genres && (
+                  <p className="text-muted text-sm">
+                    {Array.isArray(performer.genres) ? performer.genres.join(', ') : performer.genres}
+                  </p>
+                )}
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {modalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

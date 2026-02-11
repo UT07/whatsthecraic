@@ -1,608 +1,332 @@
 [
   {
-    "id": 1,
     "name": "The Academy",
     "address": "57 Middle Abbey St, North City, Dublin 1, D01 X8C2",
     "capacity": 850,
     "genreFocus": "Various",
     "latitude": 53.3481,
-    "longitude": -6.2601
+    "longitude": -6.2601,
+    "notes": "",
+    "id": 1
   },
   {
-    "id": 2,
     "name": "Button Factory",
     "address": "Curved St, Temple Bar, Dublin, D02 HW54",
     "capacity": 750,
     "genreFocus": "Electronic",
     "latitude": 53.3446,
-    "longitude": -6.2643
+    "longitude": -6.2643,
+    "notes": "",
+    "id": 2
   },
   {
-    "id": 3,
     "name": "Vicar Street",
     "address": "58-59 Thomas St, The Liberties, Dublin 8, D08 HC57",
     "capacity": 1050,
     "genreFocus": "Various",
     "latitude": 53.3421,
-    "longitude": -6.2775
+    "longitude": -6.2775,
+    "notes": "",
+    "id": 3
   },
   {
-    "id": 4,
     "name": "3Olympia Theatre",
     "address": "72 Dame St, Temple Bar, Dublin 2, D02 K135",
     "capacity": 1500,
     "genreFocus": "Various",
-    "latitude": 53.3440,
-    "longitude": -6.2650
+    "latitude": 53.344,
+    "longitude": -6.265,
+    "notes": "",
+    "id": 4
   },
   {
-    "id": 5,
     "name": "Workman's Club",
     "address": "10 Wellington Quay, Temple Bar, Dublin, D02 VX36",
     "capacity": 600,
     "genreFocus": "Indie/Electronic",
     "latitude": 53.3453,
-    "longitude": -6.2689
+    "longitude": -6.2689,
+    "notes": "",
+    "id": 5
   },
   {
-    "id": 6,
     "name": "Opium",
     "address": "26 Wexford St, Dublin 2, D02 HX93",
     "capacity": 800,
     "genreFocus": "Electronic/EDM",
     "latitude": 53.3366,
-    "longitude": -6.2657
+    "longitude": -6.2657,
+    "notes": "",
+    "id": 6
   },
   {
-    "id": 7,
     "name": "Wigwam",
     "address": "54 Middle Abbey St, North City, Dublin 1, D01 E2X4",
     "capacity": 400,
     "genreFocus": "House/Techno",
     "latitude": 53.3475,
-    "longitude": -6.2600
+    "longitude": -6.26,
+    "notes": "",
+    "id": 7
   },
   {
-    "id": 8,
     "name": "The Grand Social",
     "address": "35 Liffey Street Lower, North City, Dublin 1",
     "capacity": 450,
     "genreFocus": "Various",
     "latitude": 53.3466,
-    "longitude": -6.2632
+    "longitude": -6.2632,
+    "notes": "",
+    "id": 8
   },
   {
-    "id": 9,
     "name": "District 8",
     "address": "South Quarter, The Liberties, Dublin 8",
     "capacity": 1000,
     "genreFocus": "Techno",
     "latitude": 53.3382,
-    "longitude": -6.2831
+    "longitude": -6.2831,
+    "notes": "",
+    "id": 9
   },
-  [
   {
-    "id": 1,
     "name": "Mema's",
     "address": "123 Mock Street, Dublin, D01 ABC",
     "capacity": 100,
     "genreFocus": "Electronic",
     "latitude": 53.3498,
     "longitude": -6.2603,
-    "notes": ""
+    "notes": "",
+    "id": 10
   },
   {
-    "id": 2,
     "name": "TheBackPage",
     "address": "45 Fictional Rd, Phibsborough, Dublin 7",
     "capacity": 200,
     "genreFocus": "Various",
     "latitude": 53.3602,
     "longitude": -6.2736,
-    "notes": ""
+    "notes": "",
+    "id": 11
   },
   {
-    "id": 3,
     "name": "TheBigRomance",
     "address": "2 Imaginary Ave, Dublin 1, D01 ROMA",
     "capacity": 180,
     "genreFocus": "Electronic",
     "latitude": 53.3521,
     "longitude": -6.2679,
-    "notes": ""
+    "notes": "",
+    "id": 12
   },
   {
-    "id": 4,
     "name": "Fidelity",
     "address": "33 Sample Lane, Dublin 2, D02 FID",
     "capacity": 150,
     "genreFocus": "Various",
     "latitude": 53.3378,
     "longitude": -6.2424,
-    "notes": ""
+    "notes": "",
+    "id": 13
   },
   {
-    "id": 5,
     "name": "Lucky's",
     "address": "77 Mockingbird Walk, Dublin 8",
     "capacity": 120,
     "genreFocus": "Electronic",
     "latitude": 53.3371,
     "longitude": -6.2785,
-    "notes": ""
+    "notes": "",
+    "id": 14
   },
   {
-    "id": 6,
     "name": "Shuffleboard Bar",
     "address": "88 Boardgame Blvd, Dublin 2",
     "capacity": 90,
     "genreFocus": "Various",
     "latitude": 53.3412,
-    "longitude": -6.2620,
-    "notes": ""
+    "longitude": -6.262,
+    "notes": "",
+    "id": 15
   },
   {
-    "id": 7,
     "name": "HangDaiChinese",
     "address": "99 Sushi St, Dublin 2",
     "capacity": 140,
     "genreFocus": "Electronic",
     "latitude": 53.3395,
     "longitude": -6.2666,
-    "notes": ""
+    "notes": "",
+    "id": 16
   },
   {
-    "id": 8,
     "name": "Hen'sTeeth",
     "address": "100 Art Road, Dublin 8",
     "capacity": 160,
     "genreFocus": "House/Techno",
     "latitude": 53.3385,
     "longitude": -6.2743,
-    "notes": ""
+    "notes": "",
+    "id": 17
   },
   {
-    "id": 9,
     "name": "GenBar",
     "address": "101 Generation Ln, Dublin 1",
     "capacity": 220,
     "genreFocus": "Electronic",
     "latitude": 53.3511,
     "longitude": -6.2629,
-    "notes": ""
+    "notes": "",
+    "id": 18
   },
   {
-    "id": 10,
     "name": "RIOT",
     "address": "11 Arcade Alley, Dublin 2",
     "capacity": 0,
     "genreFocus": "Various",
     "latitude": 53.3418,
     "longitude": -6.2608,
-    "notes": "Doesn’t take bookings"
+    "notes": "Doesn’t take bookings",
+    "id": 19
   },
   {
-    "id": 11,
     "name": "Sin É (basement)",
     "address": "43 Ormond Quay Lower, Dublin 1",
     "capacity": 80,
     "genreFocus": "Various",
     "latitude": 53.3467,
-    "longitude": -6.2660,
-    "notes": ""
+    "longitude": -6.266,
+    "notes": "",
+    "id": 20
   },
   {
-    "id": 12,
     "name": "Pearse Street Centre",
     "address": "57 Pearse St, Dublin 2",
     "capacity": 300,
     "genreFocus": "Electronic",
     "latitude": 53.3436,
     "longitude": -6.2449,
-    "notes": ""
+    "notes": "",
+    "id": 21
   },
   {
-    "id": 13,
     "name": "Chelsea DrugStore (basement)",
     "address": "25 Castle Market, Dublin 2",
     "capacity": 100,
     "genreFocus": "Various",
-    "latitude": 53.3420,
+    "latitude": 53.342,
     "longitude": -6.2635,
-    "notes": ""
+    "notes": "",
+    "id": 22
   },
   {
-    "id": 14,
     "name": "JTPims (basement)",
     "address": "99 Dame St, Dublin 2",
     "capacity": 85,
     "genreFocus": "House/Techno",
     "latitude": 53.3444,
     "longitude": -6.2641,
-    "notes": ""
+    "notes": "",
+    "id": 23
   },
   {
-    "id": 15,
     "name": "Pawn Shop",
     "address": "7 Pawn Alley, Dublin 2",
     "capacity": 140,
     "genreFocus": "Electronic",
     "latitude": 53.3403,
     "longitude": -6.2639,
-    "notes": ""
+    "notes": "",
+    "id": 24
   },
   {
-    "id": 16,
     "name": "Izakaya/Tengu",
     "address": "10 Fownes St Upper, Temple Bar, Dublin 2",
     "capacity": 250,
     "genreFocus": "EDM/House",
     "latitude": 53.3443,
     "longitude": -6.2638,
-    "notes": ""
+    "notes": "",
+    "id": 25
   },
   {
-    "id": 17,
     "name": "Soundhouse",
     "address": "28 Eden Quay, North City, Dublin 1",
     "capacity": 200,
     "genreFocus": "Various",
     "latitude": 53.3475,
     "longitude": -6.2572,
-    "notes": ""
+    "notes": "",
+    "id": 26
   },
   {
-    "id": 18,
     "name": "PYG",
     "address": "59 South William St, Dublin 2",
     "capacity": 220,
     "genreFocus": "Electronic",
     "latitude": 53.3413,
     "longitude": -6.2624,
-    "notes": ""
+    "notes": "",
+    "id": 27
   },
   {
-    "id": 19,
     "name": "Bernard Shaw/Racket",
     "address": "10 Richmond St S, Saint Kevin's, Dublin 2",
     "capacity": 250,
     "genreFocus": "Various",
     "latitude": 53.3303,
     "longitude": -6.2659,
-    "notes": ""
+    "notes": "",
+    "id": 28
   },
   {
-    "id": 20,
     "name": "Bad Bobs",
     "address": "35-37 Essex St E, Temple Bar, Dublin 2",
     "capacity": 180,
     "genreFocus": "Pop/Electronic",
-    "latitude": 53.3450,
+    "latitude": 53.345,
     "longitude": -6.2652,
-    "notes": ""
+    "notes": "",
+    "id": 29
   },
   {
-    "id": 21,
     "name": "Lost Lane",
     "address": "Grafton St, Dublin 2, D02 RP20",
     "capacity": 500,
     "genreFocus": "Various",
     "latitude": 53.3418,
     "longitude": -6.2602,
-    "notes": ""
+    "notes": "",
+    "id": 30
   },
   {
-    "id": 22,
-    "name": "Wigwam",
-    "address": "54 Middle Abbey St, Dublin 1",
-    "capacity": 400,
-    "genreFocus": "House/Techno",
-    "latitude": 53.3485,
-    "longitude": -6.2602,
-    "notes": ""
-  },
-  {
-    "id": 23,
-    "name": "Button factory",
-    "address": "Curved St, Temple Bar, Dublin 2",
-    "capacity": 750,
-    "genreFocus": "Electronic",
-    "latitude": 53.3446,
-    "longitude": -6.2643,
-    "notes": ""
-  },
-  {
-    "id": 24,
     "name": "Bohemian Bar",
     "address": "99 Hippie Ln, Dublin 2",
     "capacity": 120,
     "genreFocus": "Various",
     "latitude": 53.3399,
     "longitude": -6.2658,
-    "notes": ""
+    "notes": "",
+    "id": 31
   },
   {
-    "id": 25,
     "name": "Cellar",
     "address": "12 Underground Pl, Dublin 2",
     "capacity": 100,
     "genreFocus": "Various",
     "latitude": 53.3382,
     "longitude": -6.2644,
-    "notes": "Bad staff"
+    "notes": "Bad staff",
+    "id": 32
   },
   {
-    "id": 26,
     "name": "Grand social",
     "address": "35 Liffey Street Lower, North City, Dublin 1",
     "capacity": 450,
     "genreFocus": "Various",
     "latitude": 53.3466,
     "longitude": -6.2632,
-    "notes": "Only book well known acts"
-  },
-    {
-      "id": 1,
-      "name": "Mema's",
-      "address": "123 Mock Street, Dublin, D01 ABC",
-      "capacity": 100,
-      "genreFocus": "Electronic",
-      "latitude": 53.3498,
-      "longitude": -6.2603,
-      "notes": ""
-    },
-    {
-      "id": 2,
-      "name": "TheBackPage",
-      "address": "45 Fictional Rd, Phibsborough, Dublin 7",
-      "capacity": 200,
-      "genreFocus": "Various",
-      "latitude": 53.3602,
-      "longitude": -6.2736,
-      "notes": ""
-    },
-    {
-      "id": 3,
-      "name": "TheBigRomance",
-      "address": "2 Imaginary Ave, Dublin 1, D01 ROMA",
-      "capacity": 180,
-      "genreFocus": "Electronic",
-      "latitude": 53.3521,
-      "longitude": -6.2679,
-      "notes": ""
-    },
-    {
-      "id": 4,
-      "name": "Fidelity",
-      "address": "33 Sample Lane, Dublin 2, D02 FID",
-      "capacity": 150,
-      "genreFocus": "Various",
-      "latitude": 53.3378,
-      "longitude": -6.2424,
-      "notes": ""
-    },
-    {
-      "id": 5,
-      "name": "Lucky's",
-      "address": "77 Mockingbird Walk, Dublin 8",
-      "capacity": 120,
-      "genreFocus": "Electronic",
-      "latitude": 53.3371,
-      "longitude": -6.2785,
-      "notes": ""
-    },
-    {
-      "id": 6,
-      "name": "Shuffleboard Bar",
-      "address": "88 Boardgame Blvd, Dublin 2",
-      "capacity": 90,
-      "genreFocus": "Various",
-      "latitude": 53.3412,
-      "longitude": -6.2620,
-      "notes": ""
-    },
-    {
-      "id": 7,
-      "name": "HangDaiChinese",
-      "address": "99 Sushi St, Dublin 2",
-      "capacity": 140,
-      "genreFocus": "Electronic",
-      "latitude": 53.3395,
-      "longitude": -6.2666,
-      "notes": ""
-    },
-    {
-      "id": 8,
-      "name": "Hen'sTeeth",
-      "address": "100 Art Road, Dublin 8",
-      "capacity": 160,
-      "genreFocus": "House/Techno",
-      "latitude": 53.3385,
-      "longitude": -6.2743,
-      "notes": ""
-    },
-    {
-      "id": 9,
-      "name": "GenBar",
-      "address": "101 Generation Ln, Dublin 1",
-      "capacity": 220,
-      "genreFocus": "Electronic",
-      "latitude": 53.3511,
-      "longitude": -6.2629,
-      "notes": ""
-    },
-    {
-      "id": 10,
-      "name": "RIOT",
-      "address": "11 Arcade Alley, Dublin 2",
-      "capacity": 0,
-      "genreFocus": "Various",
-      "latitude": 53.3418,
-      "longitude": -6.2608,
-      "notes": "Doesn’t take bookings"
-    },
-    {
-      "id": 11,
-      "name": "Sin É (basement)",
-      "address": "43 Ormond Quay Lower, Dublin 1",
-      "capacity": 80,
-      "genreFocus": "Various",
-      "latitude": 53.3467,
-      "longitude": -6.2660,
-      "notes": ""
-    },
-    {
-      "id": 12,
-      "name": "Pearse Street Centre",
-      "address": "57 Pearse St, Dublin 2",
-      "capacity": 300,
-      "genreFocus": "Electronic",
-      "latitude": 53.3436,
-      "longitude": -6.2449,
-      "notes": ""
-    },
-    {
-      "id": 13,
-      "name": "Chelsea DrugStore (basement)",
-      "address": "25 Castle Market, Dublin 2",
-      "capacity": 100,
-      "genreFocus": "Various",
-      "latitude": 53.3420,
-      "longitude": -6.2635,
-      "notes": ""
-    },
-    {
-      "id": 14,
-      "name": "JTPims (basement)",
-      "address": "99 Dame St, Dublin 2",
-      "capacity": 85,
-      "genreFocus": "House/Techno",
-      "latitude": 53.3444,
-      "longitude": -6.2641,
-      "notes": ""
-    },
-    {
-      "id": 15,
-      "name": "Pawn Shop",
-      "address": "7 Pawn Alley, Dublin 2",
-      "capacity": 140,
-      "genreFocus": "Electronic",
-      "latitude": 53.3403,
-      "longitude": -6.2639,
-      "notes": ""
-    },
-    {
-      "id": 16,
-      "name": "Izakaya/Tengu",
-      "address": "10 Fownes St Upper, Temple Bar, Dublin 2",
-      "capacity": 250,
-      "genreFocus": "EDM/House",
-      "latitude": 53.3443,
-      "longitude": -6.2638,
-      "notes": ""
-    },
-    {
-      "id": 17,
-      "name": "Soundhouse",
-      "address": "28 Eden Quay, North City, Dublin 1",
-      "capacity": 200,
-      "genreFocus": "Various",
-      "latitude": 53.3475,
-      "longitude": -6.2572,
-      "notes": ""
-    },
-    {
-      "id": 18,
-      "name": "PYG",
-      "address": "59 South William St, Dublin 2",
-      "capacity": 220,
-      "genreFocus": "Electronic",
-      "latitude": 53.3413,
-      "longitude": -6.2624,
-      "notes": ""
-    },
-    {
-      "id": 19,
-      "name": "Bernard Shaw/Racket",
-      "address": "10 Richmond St S, Saint Kevin's, Dublin 2",
-      "capacity": 250,
-      "genreFocus": "Various",
-      "latitude": 53.3303,
-      "longitude": -6.2659,
-      "notes": ""
-    },
-    {
-      "id": 20,
-      "name": "Bad Bobs",
-      "address": "35-37 Essex St E, Temple Bar, Dublin 2",
-      "capacity": 180,
-      "genreFocus": "Pop/Electronic",
-      "latitude": 53.3450,
-      "longitude": -6.2652,
-      "notes": ""
-    },
-    {
-      "id": 21,
-      "name": "Lost Lane",
-      "address": "Grafton St, Dublin 2, D02 RP20",
-      "capacity": 500,
-      "genreFocus": "Various",
-      "latitude": 53.3418,
-      "longitude": -6.2602,
-      "notes": ""
-    },
-    {
-      "id": 22,
-      "name": "Wigwam",
-      "address": "54 Middle Abbey St, Dublin 1",
-      "capacity": 400,
-      "genreFocus": "House/Techno",
-      "latitude": 53.3485,
-      "longitude": -6.2602,
-      "notes": ""
-    },
-    {
-      "id": 23,
-      "name": "Button factory",
-      "address": "Curved St, Temple Bar, Dublin 2",
-      "capacity": 750,
-      "genreFocus": "Electronic",
-      "latitude": 53.3446,
-      "longitude": -6.2643,
-      "notes": ""
-    },
-    {
-      "id": 24,
-      "name": "Bohemian Bar",
-      "address": "99 Hippie Ln, Dublin 2",
-      "capacity": 120,
-      "genreFocus": "Various",
-      "latitude": 53.3399,
-      "longitude": -6.2658,
-      "notes": ""
-    },
-    {
-      "id": 25,
-      "name": "Cellar",
-      "address": "12 Underground Pl, Dublin 2",
-      "capacity": 100,
-      "genreFocus": "Various",
-      "latitude": 53.3382,
-      "longitude": -6.2644,
-      "notes": "Bad staff"
-    },
-    {
-      "id": 26,
-      "name": "Grand social",
-      "address": "35 Liffey Street Lower, North City, Dublin 1",
-      "capacity": 450,
-      "genreFocus": "Various",
-      "latitude": 53.3466,
-      "longitude": -6.2632,
-      "notes": "Only book well known acts"
-    }
-  
+    "notes": "Only book well known acts",
+    "id": 33
+  }
 ]
-
-]
-

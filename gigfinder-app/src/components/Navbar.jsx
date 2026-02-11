@@ -14,6 +14,7 @@ const Navbar = ({ setIsAuthenticated }) => {
 
   const isAuthenticated = Boolean(getToken());
   const user = getUser();
+  const isOrganizer = user?.role === 'organizer' || user?.role === 'admin';
 
   return (
     <nav className="nav-shell">
@@ -26,8 +27,10 @@ const Navbar = ({ setIsAuthenticated }) => {
             <div className="nav-links">
               <Link to="/dashboard" className="nav-link">Overview</Link>
               <Link to="/discover" className="nav-link">Discover</Link>
+              <Link to="/preferences" className="nav-link">Preferences</Link>
               <Link to="/djs" className="nav-link">DJs</Link>
               <Link to="/venues" className="nav-link">Venues</Link>
+              {isOrganizer && <Link to="/organizer" className="nav-link">Organizer</Link>}
             </div>
           )}
         </div>

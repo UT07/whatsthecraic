@@ -30,8 +30,13 @@ Checklist:
 5. Confirm secrets are loaded in containers without printing values:
    `docker exec events_service sh -lc 'test -n "$TICKETMASTER_API_KEY" && echo "TICKETMASTER_API_KEY set"'`
    `docker exec events_service sh -lc 'test -n "$EVENTBRITE_API_TOKEN" && echo "EVENTBRITE_API_TOKEN set"'`
-   `docker exec events_service sh -lc 'echo "XRAVES_ENABLED=$XRAVES_ENABLED"'`
+   `docker exec events_service sh -lc 'test -n "$BANDSINTOWN_APP_ID" && echo "BANDSINTOWN_APP_ID set"'`
+   `docker exec events_service sh -lc 'echo "DICE_APIFY_ENABLED=$DICE_APIFY_ENABLED"'`
+   `docker exec events_service sh -lc 'test -n "$APIFY_TOKEN" && echo "APIFY_TOKEN set"'`
 6. Confirm rate limits are active by sending a short burst and expecting `429` after the limit.
+7. Optional CI checks (local):
+   - `npm run lint`
+   - `npm run test:unit`
 
 ## Domain + TLS (Route53 + Caddy)
 1. Create a public hosted zone in Route53 for your domain.
@@ -47,23 +52,47 @@ Checklist:
 ## Ingestion Validation (Phase 1)
 1. Confirm ingestion is enabled:
    `docker exec events_service sh -lc 'echo "INGESTION_ENABLED=$INGESTION_ENABLED"'`
-   `docker exec events_service sh -lc 'echo "XRAVES_ENABLED=$XRAVES_ENABLED"'`
+   `docker exec events_service sh -lc 'echo "DICE_APIFY_ENABLED=$DICE_APIFY_ENABLED"'`
+   `docker exec events_service sh -lc 'echo "BANDSINTOWN_APP_ID=$BANDSINTOWN_APP_ID"'`
+   `docker exec events_service sh -lc 'echo "BANDSINTOWN_SEED_ARTISTS=$BANDSINTOWN_SEED_ARTISTS"'`
 2. (Optional) Set country code for Ticketmaster if city lookups are empty:
    `TICKETMASTER_COUNTRY_CODE=IE`
 2. Trigger search:
    `curl -fsS "http://<host>:4000/v1/events/search?city=Dublin"`
-3. Confirm response includes `events` and each event includes `sources` with entries like `ticketmaster`, `eventbrite`, `xraves`, or `local`.
-4. If Eventbrite returns `401`, refresh the OAuth token and restart `events-service`.
+3. Confirm response includes `events` and each event includes `sources` with entries like `ticketmaster`, `eventbrite`, `bandsintown`, `dice` (optional), or `local`.
+4. Dice ingestion is optional/paid (Apify). Leave `DICE_APIFY_ENABLED=false` unless you want this source. If enabled, it uses the Apify actor (default `lexis-solutions~dice-fm`) with inputs like `query`, `type=city`, `maxItems`, `dateFrom`, `dateUntil`.
+5. If Eventbrite returns `401`, refresh the OAuth token and restart `events-service`.
    If Eventbrite returns `404` on search, it may require org-scoped ingestion:
    - Set `EVENTBRITE_ORG_IDS=<comma-separated org ids>` or let the service fetch your orgs.
-   If XRaves returns `403`, set a browser-like `XRAVES_USER_AGENT` and restart `events-service`.
-   If XRaves still returns `403`, enable the Playwright scraper (`xraves-scraper`) and set
-   `XRAVES_SCRAPER_URL=http://xraves-scraper:4010` so ingestion pulls `__NEXT_DATA__` via a real browser.
-   Cloudflare may be blocking the EC2 IP; allowlist the server IP or run the scraper on a separate host.
+   If Dice ingestion returns `401` or `403`, verify `APIFY_TOKEN` and that the actor is accessible under your account.
 5. Validate ingestion state in DB:
    `docker exec gigsdb sh -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SELECT source, city, last_synced_at FROM ingest_state ORDER BY last_synced_at DESC LIMIT 10" gigsdb'`
 6. Validate dedupe/normalize:
    `docker exec gigsdb sh -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SELECT event_id, COUNT(*) AS sources FROM source_events GROUP BY event_id HAVING sources > 1 LIMIT 10" gigsdb'`
+
+## Alerts + Calendar Exports
+1. Create an alert:
+   `curl -fsS -X POST http://<host>:4000/v1/alerts -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"artist_name":"Bicep","city":"Dublin"}'`
+2. Check notifications:
+   `curl -fsS http://<host>:4000/v1/alerts/notifications -H "Authorization: Bearer <token>"`
+3. Export calendar (single event):
+   `curl -fsS http://<host>:4000/v1/events/<id>/calendar`
+4. Export saved calendar:
+   `curl -fsS "http://<host>:4000/v1/users/me/calendar?token=<JWT>"`
+
+## Hide Events (Personalization Feedback)
+1. Hide an event:
+   `curl -fsS -X POST http://<host>:4000/v1/events/<id>/hide -H "Authorization: Bearer <token>"`
+2. View hidden events:
+   `curl -fsS http://<host>:4000/v1/users/me/hidden -H "Authorization: Bearer <token>"`
+3. Unhide an event:
+   `curl -fsS -X DELETE http://<host>:4000/v1/events/<id>/hide -H "Authorization: Bearer <token>"`
+
+## Saved Events
+1. Save an event:
+   `curl -fsS -X POST http://<host>:4000/v1/events/<id>/save -H "Authorization: Bearer <token>"`
+2. List saved events:
+   `curl -fsS http://<host>:4000/v1/users/me/saved -H "Authorization: Bearer <token>"`
 
 ## Rate Limit Enforcement
 1. Aggregator defaults: `RATE_LIMIT_WINDOW_MS=60000`, `RATE_LIMIT_MAX=60`.

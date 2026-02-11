@@ -14,6 +14,7 @@ const DB_USER = process.env.DB_USER || 'app';
 const DB_PASSWORD = process.env.DB_PASSWORD || 'app';
 const DB_NAME = process.env.DB_NAME || 'gigsdb';
 const API_PORT = process.env.API_PORT || process.env.VENUE_SERVICE_PORT || 4001;
+const SERVICE_NAME = 'venue-service';
 
 
 const pool = mysql.createPool({
@@ -52,7 +53,16 @@ app.use((req, res, next) => {
     metrics.requests += 1;
     metrics.totalDurationMs += durationMs;
     metrics.statusCodes[res.statusCode] = (metrics.statusCodes[res.statusCode] || 0) + 1;
-    console.log(`[${requestId}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
+    console.log(JSON.stringify({
+      level: 'info',
+      service: SERVICE_NAME,
+      request_id: requestId,
+      method: req.method,
+      path: req.originalUrl,
+      status: res.statusCode,
+      duration_ms: durationMs,
+      timestamp: new Date().toISOString()
+    }));
   });
   next();
 });
@@ -62,9 +72,32 @@ const parseIntOrDefault = (value, fallback) => {
   return Number.isNaN(parsed) ? fallback : parsed;
 };
 
+const toMysqlDateTime = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+};
+
 if (process.env.TRUST_PROXY === 'true') {
   app.set('trust proxy', 1);
 }
+
+const warnOnMissingEnv = () => {
+  const missing = [];
+  if (!DB_HOST) missing.push('DB_HOST');
+  if (!DB_USER) missing.push('DB_USER');
+  if (!DB_PASSWORD) missing.push('DB_PASSWORD');
+  if (!DB_NAME) missing.push('DB_NAME');
+  if (!missing.length) return;
+  const message = `[${SERVICE_NAME}] Missing required env: ${missing.join(', ')}`;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(message);
+  }
+  console.warn(message);
+};
+
+warnOnMissingEnv();
 
 const rateLimiter = rateLimit({
   windowMs: parseIntOrDefault(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
@@ -73,7 +106,9 @@ const rateLimiter = rateLimit({
   legacyHeaders: false
 });
 
-app.use(rateLimiter);
+if (process.env.NODE_ENV !== 'test') {
+  app.use(rateLimiter);
+}
 
 app.get('/metrics', (req, res) => {
   const uptimeSeconds = Math.floor((Date.now() - metrics.startTime) / 1000);
@@ -116,6 +151,92 @@ app.get('/venues', async (req, res) => {
   }
 });
 
+// GET /v1/venues/search => search venues with filters
+app.get('/v1/venues/search', async (req, res) => {
+  const schema = z.object({
+    q: z.string().optional(),
+    city: z.string().optional(),
+    capacityMin: z.string().optional(),
+    capacityMax: z.string().optional(),
+    genreFocus: z.string().optional(),
+    availableFrom: z.string().optional(),
+    availableTo: z.string().optional(),
+    limit: z.string().optional(),
+    offset: z.string().optional()
+  });
+  const parsed = schema.safeParse(req.query);
+  if (!parsed.success) {
+    return sendError(res, 400, 'invalid_query', 'Invalid query parameters', parsed.error.flatten());
+  }
+
+  const { q, city, capacityMin, capacityMax, genreFocus, availableFrom, availableTo, limit, offset } = parsed.data;
+  const where = [];
+  const params = [];
+
+  if (q) {
+    const keyword = `%${q.toLowerCase()}%`;
+    where.push('(LOWER(name) LIKE ? OR LOWER(address) LIKE ?)');
+    params.push(keyword, keyword);
+  }
+
+  if (city) {
+    where.push('LOWER(address) LIKE ?');
+    params.push(`%${city.toLowerCase()}%`);
+  }
+
+  if (genreFocus) {
+    where.push('LOWER(genreFocus) LIKE ?');
+    params.push(`%${genreFocus.toLowerCase()}%`);
+  }
+
+  if (capacityMin) {
+    const min = Number.parseInt(capacityMin, 10);
+    if (!Number.isNaN(min)) {
+      where.push('capacity >= ?');
+      params.push(min);
+    }
+  }
+
+  if (capacityMax) {
+    const max = Number.parseInt(capacityMax, 10);
+    if (!Number.isNaN(max)) {
+      where.push('capacity <= ?');
+      params.push(max);
+    }
+  }
+
+  const fromDate = toMysqlDateTime(availableFrom);
+  const toDate = toMysqlDateTime(availableTo);
+  if (fromDate && toDate) {
+    where.push(
+      `EXISTS (
+        SELECT 1 FROM venue_availability va
+        WHERE va.venue_id = venues.id
+          AND va.start_time <= ?
+          AND va.end_time >= ?
+      )`
+    );
+    params.push(toDate, fromDate);
+  }
+
+  const parsedLimit = Number.parseInt(limit || '100', 10);
+  const limitValue = Number.isNaN(parsedLimit) ? 100 : Math.min(parsedLimit, 500);
+  const parsedOffset = Number.parseInt(offset || '0', 10);
+  const offsetValue = Number.isNaN(parsedOffset) ? 0 : Math.max(parsedOffset, 0);
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  try {
+    const [rows] = await pool.query(
+      `SELECT * FROM venues ${whereSql} ORDER BY name ASC LIMIT ? OFFSET ?`,
+      [...params, limitValue, offsetValue]
+    );
+    res.json({ venues: rows, count: rows.length });
+  } catch (err) {
+    console.error('Error searching venues:', err);
+    return sendError(res, 500, 'internal_error', 'Failed to search venues');
+  }
+});
+
 // GET /venues/:id => SELECT * FROM venues WHERE id=?
 app.get('/venues/:id', async (req, res) => {
   const venueId = parseIdParam(req.params.id);
@@ -131,6 +252,87 @@ app.get('/venues/:id', async (req, res) => {
   } catch (err) {
     console.error('Error retrieving venue:', err);
     return sendError(res, 500, 'internal_error', 'Failed to retrieve venue');
+  }
+});
+
+// GET /v1/venues/:id/availability => list availability windows
+app.get('/v1/venues/:id/availability', async (req, res) => {
+  const venueId = parseIdParam(req.params.id);
+  if (venueId === null) {
+    return sendError(res, 400, 'invalid_id', 'Invalid venue id');
+  }
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM venue_availability WHERE venue_id = ? ORDER BY start_time ASC',
+      [venueId]
+    );
+    return res.json({ venue_id: venueId, availability: rows });
+  } catch (err) {
+    console.error('Error fetching availability:', err);
+    return sendError(res, 500, 'internal_error', 'Failed to fetch availability');
+  }
+});
+
+// POST /v1/venues/:id/availability => add availability window
+app.post('/v1/venues/:id/availability', async (req, res) => {
+  const venueId = parseIdParam(req.params.id);
+  if (venueId === null) {
+    return sendError(res, 400, 'invalid_id', 'Invalid venue id');
+  }
+  const schema = z.object({
+    start_time: z.string(),
+    end_time: z.string(),
+    status: z.string().optional(),
+    notes: z.string().optional()
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, 'invalid_body', 'Invalid request body', parsed.error.flatten());
+  }
+  const startTime = toMysqlDateTime(parsed.data.start_time);
+  const endTime = toMysqlDateTime(parsed.data.end_time);
+  if (!startTime || !endTime) {
+    return sendError(res, 400, 'invalid_body', 'Invalid date range');
+  }
+  try {
+    const [existing] = await pool.query('SELECT id FROM venues WHERE id = ?', [venueId]);
+    if (existing.length === 0) {
+      return sendError(res, 404, 'not_found', 'Venue not found');
+    }
+    const [result] = await pool.execute(
+      `INSERT INTO venue_availability
+        (venue_id, start_time, end_time, status, notes)
+       VALUES (?, ?, ?, ?, ?)`,
+      [venueId, startTime, endTime, parsed.data.status || 'available', parsed.data.notes || null]
+    );
+    const [rows] = await pool.query('SELECT * FROM venue_availability WHERE id = ?', [result.insertId]);
+    return res.status(201).json({ availability: rows[0] });
+  } catch (err) {
+    console.error('Error creating availability:', err);
+    return sendError(res, 500, 'internal_error', 'Failed to create availability');
+  }
+});
+
+// DELETE /v1/venues/:id/availability/:availability_id => remove availability window
+app.delete('/v1/venues/:id/availability/:availability_id', async (req, res) => {
+  const venueId = parseIdParam(req.params.id);
+  const availabilityId = parseIdParam(req.params.availability_id);
+  if (venueId === null || availabilityId === null) {
+    return sendError(res, 400, 'invalid_id', 'Invalid id');
+  }
+  try {
+    const [existing] = await pool.query(
+      'SELECT * FROM venue_availability WHERE id = ? AND venue_id = ?',
+      [availabilityId, venueId]
+    );
+    if (existing.length === 0) {
+      return sendError(res, 404, 'not_found', 'Availability not found');
+    }
+    await pool.execute('DELETE FROM venue_availability WHERE id = ?', [availabilityId]);
+    return res.json({ deleted: true });
+  } catch (err) {
+    console.error('Error deleting availability:', err);
+    return sendError(res, 500, 'internal_error', 'Failed to delete availability');
   }
 });
 
@@ -255,6 +457,10 @@ app.delete('/venues/:id', async (req, res) => {
 
 // 4. Start the server
 const PORT = process.env.PORT || API_PORT || 4001;
-app.listen(PORT, () => {
-  console.log(`Venue Service listening on port ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`${SERVICE_NAME} listening on port ${PORT}`);
+  });
+}
+
+module.exports = { app, pool };

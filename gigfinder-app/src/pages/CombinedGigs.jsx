@@ -22,12 +22,21 @@ const CombinedGigs = () => {
   const [mode, setMode] = useState('feed');
   const [savedIds, setSavedIds] = useState(new Set());
   const token = getToken();
+  const [alerts, setAlerts] = useState([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertForm, setAlertForm] = useState({ artist_name: '', city: '' });
+  const [alertResults, setAlertResults] = useState([]);
+  const [hiddenEvents, setHiddenEvents] = useState([]);
+  const [savedEvents, setSavedEvents] = useState([]);
 
   const [filters, setFilters] = useState({
     city: '',
     from: '',
     to: '',
     genres: '',
+    q: '',
+    artist: '',
+    venue: '',
     priceMax: '',
     source: ''
   });
@@ -72,12 +81,91 @@ const CombinedGigs = () => {
     }
   }, [mode]);
 
+  useEffect(() => {
+    if (!token) return;
+    eventsAPI.getAlerts()
+      .then((data) => setAlerts(data.alerts || []))
+      .catch(() => setAlerts([]));
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    eventsAPI.getHiddenEvents()
+      .then((data) => setHiddenEvents(data.events || []))
+      .catch(() => setHiddenEvents([]));
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    eventsAPI.getSavedEvents()
+      .then((data) => setSavedEvents(data.events || []))
+      .catch(() => setSavedEvents([]));
+  }, [token]);
+
   const handleSave = async (id) => {
     try {
       await eventsAPI.saveEvent(id);
       setSavedIds(prev => new Set([...prev, id]));
+      const savedEvent = events.find(item => item.id === id);
+      if (savedEvent) {
+        setSavedEvents(prev => [savedEvent, ...prev.filter(item => item.id !== id)]);
+      }
     } catch (error) {
       console.error('Save failed:', error);
+    }
+  };
+
+  const handleHide = async (event) => {
+    try {
+      await eventsAPI.hideEvent(event.id);
+      setEvents(prev => prev.filter(item => item.id !== event.id));
+      setHiddenEvents(prev => [event, ...prev]);
+    } catch (error) {
+      console.error('Hide failed:', error);
+    }
+  };
+
+  const handleUnhide = async (eventId) => {
+    try {
+      await eventsAPI.unhideEvent(eventId);
+      setHiddenEvents(prev => prev.filter(event => event.id !== eventId));
+    } catch (error) {
+      console.error('Unhide failed:', error);
+    }
+  };
+
+  const createAlert = async () => {
+    if (!alertForm.artist_name.trim()) return;
+    try {
+      setAlertsLoading(true);
+      const response = await eventsAPI.createAlert(alertForm);
+      setAlerts(prev => [response.alert, ...prev]);
+      setAlertForm({ artist_name: '', city: '' });
+    } catch (error) {
+      console.error('Alert create failed:', error);
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
+
+  const deleteAlert = async (id) => {
+    try {
+      await eventsAPI.deleteAlert(id);
+      setAlerts(prev => prev.filter(alert => alert.id !== id));
+    } catch (error) {
+      console.error('Alert delete failed:', error);
+    }
+  };
+
+  const checkAlerts = async () => {
+    try {
+      setAlertsLoading(true);
+      const data = await eventsAPI.checkAlertNotifications();
+      setAlertResults(data.alerts || []);
+    } catch (error) {
+      console.error('Alert check failed:', error);
+    } finally {
+      setAlertsLoading(false);
     }
   };
 
@@ -93,6 +181,16 @@ const CombinedGigs = () => {
             </p>
           </div>
           <div className="flex gap-3">
+            {token && (
+              <a
+                className="btn btn-outline"
+                href={eventsAPI.getUserCalendarUrl(token)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Export Saved Calendar
+              </a>
+            )}
             <button
               className={`btn ${mode === 'feed' ? 'btn-primary' : 'btn-outline'}`}
               onClick={() => setMode('feed')}
@@ -112,15 +210,33 @@ const CombinedGigs = () => {
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           <input
             className="input"
+            placeholder="Search keyword"
+            value={filters.q}
+            onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+          />
+          <input
+            className="input"
             placeholder="City (ex: Dublin)"
             value={filters.city}
             onChange={(e) => setFilters({ ...filters, city: e.target.value })}
           />
           <input
             className="input"
+            placeholder="Artist (ex: Fontaines D.C.)"
+            value={filters.artist}
+            onChange={(e) => setFilters({ ...filters, artist: e.target.value })}
+          />
+          <input
+            className="input"
             placeholder="Genres (comma separated)"
             value={filters.genres}
             onChange={(e) => setFilters({ ...filters, genres: e.target.value })}
+          />
+          <input
+            className="input"
+            placeholder="Venue name"
+            value={filters.venue}
+            onChange={(e) => setFilters({ ...filters, venue: e.target.value })}
           />
           <select
             className="input"
@@ -130,7 +246,8 @@ const CombinedGigs = () => {
             <option value="">All sources</option>
             <option value="ticketmaster">Ticketmaster</option>
             <option value="eventbrite">Eventbrite</option>
-            <option value="xraves">XRaves</option>
+            <option value="bandsintown">Bandsintown</option>
+            <option value="dice">Dice.fm</option>
             <option value="local">Manual</option>
           </select>
           <input
@@ -160,13 +277,149 @@ const CombinedGigs = () => {
           </button>
           <button
             className="btn btn-outline"
-            onClick={() => setFilters({ city: '', from: '', to: '', genres: '', priceMax: '', source: '' })}
+            onClick={() => setFilters({
+              city: '',
+              from: '',
+              to: '',
+              genres: '',
+              q: '',
+              artist: '',
+              venue: '',
+              priceMax: '',
+              source: ''
+            })}
           >
             Clear filters
           </button>
           {!token && <span className="chip">Login to unlock "For You"</span>}
         </div>
       </section>
+
+      {token && (
+        <section className="card space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="badge mb-2">Alerts</div>
+              <h2 className="section-title text-base">Artist alerts</h2>
+              <p className="section-subtitle">Get notified when a tracked artist announces a new event in your city.</p>
+            </div>
+            <button className="btn btn-outline" onClick={checkAlerts} disabled={alertsLoading}>
+              {alertsLoading ? 'Checking…' : 'Check alerts'}
+            </button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <input
+              className="input"
+              placeholder="Artist name"
+              value={alertForm.artist_name}
+              onChange={(e) => setAlertForm({ ...alertForm, artist_name: e.target.value })}
+            />
+            <input
+              className="input"
+              placeholder="City (optional)"
+              value={alertForm.city}
+              onChange={(e) => setAlertForm({ ...alertForm, city: e.target.value })}
+            />
+            <button className="btn btn-primary" onClick={createAlert} disabled={alertsLoading}>
+              Add alert
+            </button>
+          </div>
+          <div className="grid-auto">
+            {alerts.length === 0 ? (
+              <div className="card text-center text-muted">No alerts yet.</div>
+            ) : (
+              alerts.map(alert => (
+                <div key={alert.id} className="card flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold">{alert.artist_name}</div>
+                    <div className="text-muted text-xs">{alert.city || 'Any city'}</div>
+                  </div>
+                  <button className="btn btn-ghost" onClick={() => deleteAlert(alert.id)}>Remove</button>
+                </div>
+              ))
+            )}
+          </div>
+          {alertResults.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="section-title text-base">New matches</h3>
+              {alertResults.map(result => (
+                <div key={result.alert.id} className="card">
+                  <div className="text-sm font-semibold">{result.alert.artist_name}</div>
+                  <div className="text-muted text-xs mb-3">{result.alert.city || 'Any city'}</div>
+                  {result.events.length === 0 ? (
+                    <div className="text-muted text-sm">No new events.</div>
+                  ) : (
+                    <ul className="text-sm space-y-1">
+                      {result.events.map(evt => (
+                        <li key={evt.id}>{evt.title} · {formatDate(evt.start_time)}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {token && (
+        <section className="card space-y-4">
+          <div>
+            <div className="badge mb-2">Saved</div>
+            <h2 className="section-title text-base">Saved events</h2>
+            <p className="section-subtitle">Your shortlist of events to revisit.</p>
+          </div>
+          {savedEvents.length === 0 ? (
+            <div className="text-muted text-sm">No saved events yet.</div>
+          ) : (
+            <div className="grid gap-2">
+              {savedEvents.map(event => (
+                <div key={event.id} className="card flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold">{event.title}</div>
+                    <div className="text-xs text-muted">{formatDate(event.start_time)}</div>
+                  </div>
+                  <a
+                    className="btn btn-ghost"
+                    href={eventsAPI.getEventCalendarUrl(event.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Calendar
+                  </a>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {token && (
+        <section className="card space-y-4">
+          <div>
+            <div className="badge mb-2">Hidden</div>
+            <h2 className="section-title text-base">Hidden events</h2>
+            <p className="section-subtitle">Review and restore anything you hid from your feed.</p>
+          </div>
+          {hiddenEvents.length === 0 ? (
+            <div className="text-muted text-sm">No hidden events yet.</div>
+          ) : (
+            <div className="grid gap-2">
+              {hiddenEvents.map(event => (
+                <div key={event.id} className="card flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold">{event.title}</div>
+                    <div className="text-xs text-muted">{formatDate(event.start_time)}</div>
+                  </div>
+                  <button className="btn btn-ghost" onClick={() => handleUnhide(event.id)}>
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="grid-auto">
         {loading ? (
@@ -208,10 +461,23 @@ const CombinedGigs = () => {
                   ))}
                 </div>
                 <div className="flex flex-wrap gap-3 mt-auto">
+                  <a
+                    className="btn btn-outline"
+                    href={eventsAPI.getEventCalendarUrl(event.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Add to calendar
+                  </a>
                   {event.ticket_url && (
                     <a className="btn btn-outline" href={event.ticket_url} target="_blank" rel="noreferrer">
                       Tickets
                     </a>
+                  )}
+                  {token && (
+                    <button className="btn btn-ghost" onClick={() => handleHide(event)}>
+                      Hide
+                    </button>
                   )}
                   <button
                     className={`btn ${saved ? 'btn-outline' : 'btn-primary'}`}

@@ -178,6 +178,48 @@ CREATE TABLE contact_requests (
 ALTER TABLE users ADD COLUMN role VARCHAR(32) DEFAULT 'user';
 ```
 
+## Migration 009 — Alerts + Venue Availability
+```
+CREATE TABLE user_alerts (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  artist_name VARCHAR(255) NOT NULL,
+  city VARCHAR(100),
+  radius_km INT,
+  last_notified_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX user_alerts_user_idx (user_id),
+  CONSTRAINT fk_user_alerts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE venue_availability (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  venue_id INT NOT NULL,
+  start_time DATETIME NOT NULL,
+  end_time DATETIME NOT NULL,
+  status VARCHAR(32) DEFAULT 'available',
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX venue_availability_venue_idx (venue_id),
+  CONSTRAINT fk_venue_availability_venue FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE
+);
+```
+
+## Migration 010 — Hidden Events
+```
+CREATE TABLE user_hidden_events (
+  user_id INT NOT NULL,
+  event_id INT NOT NULL,
+  hidden_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, event_id),
+  INDEX user_hidden_events_event_idx (event_id),
+  CONSTRAINT fk_hidden_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hidden_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+```
+
 ## Local Dev
 `init-gigsdb.sql` includes both changes for local bootstrapping.
 

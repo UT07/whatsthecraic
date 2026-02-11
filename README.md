@@ -36,9 +36,16 @@ Health + metrics:
 - `GET /metrics`
 
 ## Canonical Events API (Implemented)
-- `GET /v1/events/search?city=&from=&to=&genres=&priceMax=&source=`
+- `GET /v1/events/search?city=&from=&to=&genres=&q=&artist=&venue=&priceMax=&source=`
 - `GET /v1/events/:id`
 - `POST /v1/events/:id/save` (requires `Authorization: Bearer <token>`)
+- `POST /v1/events/:id/hide` (requires `Authorization: Bearer <token>`)
+- `DELETE /v1/events/:id/hide` (requires `Authorization: Bearer <token>`)
+- `GET /v1/users/me/hidden` (requires `Authorization: Bearer <token>`)
+- `GET /v1/users/me/saved` (requires `Authorization: Bearer <token>`)
+- `GET /v1/performers?include=local,ticketmaster,spotify&city=&q=`
+- `GET /v1/events/:id/calendar` (ICS export)
+- `GET /v1/users/me/calendar` (ICS export, requires auth)
 
 Personalized ranking:
 - `GET /v1/events/search?rank=personalized` (requires `Authorization: Bearer <token>`)
@@ -51,6 +58,34 @@ Legacy/combined gigs:
 - `GET /v1/users/me/feed` (requires `Authorization: Bearer <token>`)
 - Ranked using explicit preferences + Spotify signals when available.
 
+## Alerts (Implemented)
+- `POST /v1/alerts` (artist + optional city)
+- `GET /v1/alerts`
+- `GET /v1/alerts/notifications`
+- `DELETE /v1/alerts/:id`
+
+## Directory Search (Implemented)
+- `GET /v1/djs/search?q=&city=&genres=&feeMin=&feeMax=&currency=`
+- `GET /v1/venues/search?q=&city=&capacityMin=&capacityMax=&genreFocus=`
+- `GET /v1/venues/:id/availability`
+- `POST /v1/venues/:id/availability`
+- `DELETE /v1/venues/:id/availability/:availability_id`
+
+## Organizer Marketplace (API Implemented)
+Requires `role=organizer` or `role=admin` on the JWT.
+- `POST /v1/organizer/plans`
+- `GET /v1/organizer/plans`
+- `GET /v1/organizer/plans/:id`
+- `PUT /v1/organizer/plans/:id`
+- `POST /v1/organizer/plans/:id/search/djs`
+- `POST /v1/organizer/plans/:id/search/venues`
+- `POST /v1/organizer/plans/:id/shortlist`
+- `GET /v1/organizer/plans/:id/shortlist`
+- `GET /v1/organizer/plans/:id/shortlist/export?format=csv|json`
+- `GET /v1/organizer/contact-templates`
+- `POST /v1/organizer/contact-requests`
+- `GET /v1/organizer/contact-requests`
+
 ## Auth + Preferences (Implemented)
 - `POST /auth/signup`
 - `POST /auth/login`
@@ -60,6 +95,12 @@ Legacy/combined gigs:
 Preference payload supports:
 - `preferred_genres`
 - `preferred_artists`
+ - `preferred_cities`
+ - `preferred_venues`
+ - `preferred_djs`
+ - `budget_max`
+ - `radius_km`
+ - `night_preferences`
 
 ## Spotify OAuth (Implemented)
 - `GET /auth/spotify/login` with `Authorization: Bearer <token>`
@@ -73,6 +114,7 @@ Required env:
 - `SPOTIFY_CLIENT_ID`
 - `SPOTIFY_CLIENT_SECRET`
 - `SPOTIFY_REDIRECT_URI`
+- `SPOTIFY_SCOPES` (default: `user-top-read user-follow-read user-library-read user-read-email`)
 
 Local redirect example:
 - `http://localhost:3001/auth/spotify/callback`
@@ -81,7 +123,8 @@ Local redirect example:
 Sources supported:
 - Ticketmaster (Discovery API)
 - Eventbrite (token-based)
-- XRaves (scraper or direct fetch)
+- Bandsintown (artist-based)
+- Dice.fm via Apify actor (optional/paid; disabled by default)
 - Local events
 
 Key env flags (see `.env.example`):
@@ -89,7 +132,13 @@ Key env flags (see `.env.example`):
 - `INGESTION_DEFAULT_CITY` + `INGESTION_STALE_HOURS`
 - `TICKETMASTER_API_KEY` + `TICKETMASTER_COUNTRY_CODE`
 - `EVENTBRITE_API_TOKEN` + `EVENTBRITE_ORG_IDS`
-- `XRAVES_ENABLED`, `XRAVES_BASE_URL`, `XRAVES_SCRAPER_URL`
+- `BANDSINTOWN_APP_ID`, `BANDSINTOWN_SEED_ARTISTS`, `BANDSINTOWN_ALLOW_ANY_ARTIST`
+- `DICE_APIFY_ENABLED`, `DICE_APIFY_ACTOR`, `DICE_APIFY_MAX_ITEMS`, `DICE_APIFY_USE_PROXY`, `APIFY_TOKEN`
+
+Dice ingestion notes:
+- Optional and paid (Apify). Leave `DICE_APIFY_ENABLED=false` unless you want this source.
+- Default actor: `lexis-solutions~dice-fm` (Apify).
+- Inputs: `query` (city), `type=city`, `maxItems`, `dateFrom`, `dateUntil`.
 
 Manual run (inside `events-service`):
 - `npm run ingest`
@@ -108,6 +157,8 @@ Manual run (inside `events-service`):
 Primary UI:
 - `gigfinder-app`
 - Start: `cd gigfinder-app && npm install && npm start`
+ - Preferences: `/preferences`
+ - Organizer workspace: `/organizer` (requires organizer role)
 
 Legacy/alternate UI:
 - `gigfinder`
@@ -118,3 +169,11 @@ Legacy/alternate UI:
 - Organizer marketplace (plans, shortlist, contact workflow).
 - Production hardening: CI, tests, observability, runbooks.
 - Optional infra upgrades: ECS Fargate + ALB + Aurora + S3 + SQS/SNS + DynamoDB + Route53 + Amplify.
+
+## Testing
+- Unit smoke tests (health + metrics):
+  - `npm run test:unit`
+- Lint:
+  - `npm run lint`
+- End-to-end smoke:
+  - `scripts/ci-smoke.sh`

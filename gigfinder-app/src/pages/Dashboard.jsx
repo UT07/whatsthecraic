@@ -9,7 +9,7 @@ import { getToken } from '../services/apiClient';
 
 Chart.register(...registerables);
 Chart.defaults.font.family = 'Space Grotesk, system-ui, sans-serif';
-Chart.defaults.color = '#2b251f';
+Chart.defaults.color = '#c7d0d9';
 
 const chartOptions = {
   plugins: {
@@ -35,12 +35,12 @@ const computeEventsByCity = (events = []) => {
   const labels = Object.keys(cityCount);
   const data = labels.map(city => cityCount[city]);
   const palette = [
-    '#ff6b35',
-    '#2ec4b6',
-    '#f6b93b',
-    '#ff9f1c',
-    '#2d4059',
-    '#b8b1a9'
+    '#00f5a0',
+    '#00c2ff',
+    '#ffb454',
+    '#ff6b6b',
+    '#8c7bff',
+    '#3c455a'
   ];
   return {
     labels,
@@ -59,7 +59,7 @@ const computeTopDJsByFee = (djs = []) => {
       {
         label: 'Top DJs by Fee',
         data: sorted.map(dj => parseFloat(dj.numeric_fee)),
-        backgroundColor: '#2d4059'
+        backgroundColor: '#00c2ff'
       }
     ]
   };
@@ -80,7 +80,7 @@ const computeEventCountByVenue = (events = [], venues = []) => {
   });
   return {
     labels,
-    datasets: [{ label: 'Events per Venue', data, backgroundColor: '#ff6b35' }]
+    datasets: [{ label: 'Events per Venue', data, backgroundColor: '#00f5a0' }]
   };
 };
 
@@ -164,6 +164,9 @@ const Dashboard = () => {
             >
               Sync Now
             </button>
+            <a className="btn btn-outline" href="/preferences">
+              Edit Preferences
+            </a>
           </div>
           <p className="text-muted text-sm mt-3">
             {spotifyStatus?.linked ? `Linked · last sync ${spotifyStatus?.last_synced_at || 'pending'}` : 'Not linked yet'}

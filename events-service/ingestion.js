@@ -2,10 +2,6 @@ const axios = require('axios');
 const crypto = require('crypto');
 
 const http = axios.create({ timeout: 10000 });
-const XRAVES_SCRAPER_TIMEOUT_MS = Number.parseInt(
-  process.env.XRAVES_SCRAPER_TIMEOUT_MS || '30000',
-  10
-);
 
 const toMysqlDateTime = (value) => {
   if (!value) return null;
@@ -399,165 +395,205 @@ const ingestEventbrite = async (pool, { city, startDate, endDate, token, maxPage
   return { source: 'eventbrite', skipped: false, count: ingested };
 };
 
-const extractXravesNextData = (html) => {
-  if (!html) return null;
-  const match = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
-  if (!match || !match[1]) return null;
-  return safeJsonParse(match[1].trim());
+const normalizeDiceActorId = (value) => {
+  if (!value) return 'lexis-solutions~dice-fm';
+  return value.replace('/', '~');
 };
 
-const extractXravesEvents = (nextData) => {
-  const fallback = nextData?.props?.pageProps?.fallback;
-  if (!fallback || typeof fallback !== 'object') return [];
-  const candidates = [];
-  const collect = (value) => {
-    if (!value) return;
-    if (Array.isArray(value)) {
-      candidates.push(...value);
-      return;
-    }
-    if (typeof value === 'object') {
-      if (Array.isArray(value.data)) {
-        candidates.push(...value.data);
-        return;
-      }
-      for (const nested of Object.values(value)) {
-        collect(nested);
-      }
-    }
-  };
-  for (const value of Object.values(fallback)) {
-    collect(value);
+const normalizeTagList = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map(item => String(item).toLowerCase().trim()).filter(Boolean);
   }
-  return candidates.filter(item => {
-    const attrs = item?.attributes;
-    return attrs?.name && (attrs?.startDateTime || attrs?.start_date || attrs?.eventUrl);
-  });
+  return String(value)
+    .split(/[,|/]+/)
+    .map(item => item.toLowerCase().trim())
+    .filter(Boolean);
 };
 
-const resolveUrl = (baseUrl, value) => {
-  if (!value || typeof value !== 'string') return null;
-  if (value.startsWith('http://') || value.startsWith('https://')) return value;
-  if (!baseUrl) return value;
-  const trimmedBase = baseUrl.replace(/\/+$/, '');
-  const trimmedValue = value.startsWith('/') ? value : `/${value}`;
-  return `${trimmedBase}${trimmedValue}`;
+const inferCurrency = (value) => {
+  if (typeof value !== 'string') return null;
+  if (value.includes('€')) return 'EUR';
+  if (value.includes('£')) return 'GBP';
+  if (value.includes('$')) return 'USD';
+  return null;
 };
 
-const extractXravesImages = (attrs) => {
-  const images = [];
-  const pushUrl = (url) => {
-    if (url && typeof url === 'string') {
-      images.push({ url });
-    }
-  };
-  const eventImage = attrs?.eventImage;
-  if (typeof eventImage === 'string') {
-    pushUrl(eventImage);
-    return images;
-  }
-  pushUrl(eventImage?.url);
-  pushUrl(eventImage?.data?.attributes?.url);
-  const formats = eventImage?.data?.attributes?.formats;
-  if (formats && typeof formats === 'object') {
-    Object.values(formats).forEach(format => pushUrl(format?.url));
-  }
-  return images;
+const parsePrice = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const cleaned = String(value).replace(/[^0-9.]/g, '');
+  if (!cleaned) return null;
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isNaN(parsed) ? null : parsed;
 };
 
-const stripTrailingSlash = (value) => {
-  if (!value || typeof value !== 'string') return value;
-  return value.endsWith('/') ? value.slice(0, -1) : value;
+const parseDiceDate = (value) => {
+  if (!value) return null;
+  if (typeof value === 'number') {
+    const ms = value < 1e12 ? value * 1000 : value;
+    return toMysqlDateTime(ms);
+  }
+  return toMysqlDateTime(value);
 };
 
-const fetchXravesNextData = async ({ baseUrl, userAgent, scraperUrl }) => {
-  if (scraperUrl) {
-    try {
-      const response = await http.post(
-        `${stripTrailingSlash(scraperUrl)}/scrape`,
-        { url: baseUrl, userAgent },
-        { timeout: XRAVES_SCRAPER_TIMEOUT_MS }
-      );
-      const nextData = response.data?.nextData || response.data?.next_data || response.data?.data;
-      if (nextData && typeof nextData === 'object') {
-        return nextData;
-      }
-      if (typeof nextData === 'string') {
-        return safeJsonParse(nextData);
-      }
-    } catch (error) {
-      console.warn('XRaves scraper failed, falling back to direct fetch:', error.message);
-    }
-  }
-
-  const headers = {
-    'User-Agent': userAgent || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache'
-  };
-  const response = await http.get(baseUrl, { headers });
-  return extractXravesNextData(response.data);
+const parseBandsintownDate = (value) => {
+  if (!value) return null;
+  return toMysqlDateTime(value);
 };
 
-const ingestXraves = async (pool, { baseUrl, userAgent, scraperUrl, city, startDate, endDate, enabled = true }) => {
-  if (!enabled) {
-    return { source: 'xraves', skipped: true, reason: 'disabled', count: 0 };
+const normalizeBandsintownTags = (lineup) => {
+  if (!Array.isArray(lineup)) return [];
+  return lineup
+    .map(item => String(item || '').trim().toLowerCase())
+    .filter(Boolean);
+};
+
+const ingestBandsintownArtists = async (pool, {
+  artists = [],
+  appId,
+  startDate,
+  endDate,
+  city,
+  maxArtists = 10,
+  maxEvents = 300
+}) => {
+  if (!appId) {
+    return { source: 'bandsintown', skipped: true, reason: 'missing_app_id', count: 0 };
   }
 
-  const resolvedBaseUrl = baseUrl || 'https://xraves.ie/';
-  const nextData = await fetchXravesNextData({
-    baseUrl: resolvedBaseUrl,
-    userAgent,
-    scraperUrl
-  });
-  if (!nextData) {
-    return { source: 'xraves', skipped: true, reason: 'missing_next_data', count: 0 };
+  if (!artists || artists.length === 0) {
+    return { source: 'bandsintown', skipped: true, reason: 'no_artists', count: 0 };
   }
 
-  const events = extractXravesEvents(nextData);
-  const seen = new Set();
+  const fromDate = startDate ? new Date(startDate) : null;
+  const toDate = endDate ? new Date(endDate) : null;
   let ingested = 0;
 
-  for (const item of events) {
-    const sourceId = item?.id ? String(item.id) : null;
-    if (!sourceId || seen.has(sourceId)) {
-      continue;
-    }
-    seen.add(sourceId);
+  const trimmedArtists = artists
+    .map(name => String(name || '').trim())
+    .filter(Boolean)
+    .slice(0, maxArtists);
 
-    const attrs = item.attributes || {};
-    const venue = attrs.venue || {};
-    const venueLocation = safeJsonParse(venue.venueLocation);
-    const address = venueLocation?.address || venueLocation || {};
-    const cityName =
-      address.addressLocality ||
-      address.locality ||
-      venue.venueCounty ||
-      city ||
-      null;
+  for (const artist of trimmedArtists) {
+    const response = await http.get(
+      `https://rest.bandsintown.com/artists/${encodeURIComponent(artist)}/events`,
+      { params: { app_id: appId } }
+    );
+    const events = Array.isArray(response.data) ? response.data : [];
+
+    for (const evt of events) {
+      if (ingested >= maxEvents) break;
+      const startTime = parseBandsintownDate(
+        evt?.datetime || evt?.starts_at || evt?.start_datetime || evt?.date
+      );
+      if (!startTime) continue;
+      const startObj = new Date(startTime);
+      if (Number.isNaN(startObj.getTime())) continue;
+      if (fromDate && startObj < fromDate) continue;
+      if (toDate && startObj > toDate) continue;
+
+      const venue = evt?.venue || {};
+      if (city && venue.city && venue.city.toLowerCase() !== city.toLowerCase()) {
+        continue;
+      }
+
+      const tags = normalizeBandsintownTags(evt?.lineup);
+      const ticketUrl = evt?.offers?.[0]?.url || evt?.url || null;
+
+      const eventRecord = {
+        title: evt?.title || evt?.name || `${artist} Live`,
+        description: evt?.description || null,
+        start_time: startTime,
+        end_time: parseBandsintownDate(evt?.ends_at) || null,
+        city: venue.city || city || null,
+        latitude: venue.latitude || null,
+        longitude: venue.longitude || null,
+        venue_name: venue.name || null,
+        ticket_url: ticketUrl,
+        age_restriction: evt?.age_restriction || null,
+        price_min: null,
+        price_max: null,
+        currency: null,
+        genres: [],
+        tags: ['bandsintown', ...tags],
+        images: evt?.artist?.image_url ? [{ url: evt.artist.image_url }] : []
+      };
+
+      if (!eventRecord.title || !eventRecord.start_time) {
+        continue;
+      }
+
+      const eventId = await upsertEvent(pool, eventRecord);
+      await upsertSourceEvent(pool, {
+        source: 'bandsintown',
+        source_id: String(evt?.id || evt?.url || `${artist}-${eventId}`),
+        event_id: eventId,
+        raw_payload: evt
+      });
+      ingested += 1;
+    }
+  }
+
+  await updateIngestState(pool, 'bandsintown', city || 'global', startDate, endDate);
+  return { source: 'bandsintown', skipped: false, count: ingested };
+};
+
+const ingestDiceApify = async (pool, { city, startDate, endDate, enabled = true, actorId, apifyToken, maxItems = 200, useProxy = true }) => {
+  if (!enabled) {
+    return { source: 'dice', skipped: true, reason: 'disabled', count: 0 };
+  }
+  if (!apifyToken) {
+    return { source: 'dice', skipped: true, reason: 'missing_apify_token', count: 0 };
+  }
+
+  const resolvedActor = normalizeDiceActorId(actorId);
+  const url = `https://api.apify.com/v2/acts/${encodeURIComponent(resolvedActor)}/run-sync-get-dataset-items`;
+  const payload = {
+    query: city || 'Dublin',
+    type: 'city',
+    maxItems,
+    dateFrom: startDate ? toEventbriteDate(startDate) : undefined,
+    dateUntil: endDate ? toEventbriteDate(endDate) : undefined,
+    proxyConfiguration: { useApifyProxy: useProxy }
+  };
+
+  const response = await http.post(url, payload, {
+    headers: { Authorization: `Bearer ${apifyToken}` },
+    timeout: 120000
+  });
+  const items = Array.isArray(response.data)
+    ? response.data
+    : response.data?.items || [];
+
+  let ingested = 0;
+
+  for (const item of items) {
+    const sourceId = item?.id || item?.eventId || item?.slug || item?.url;
+    if (!sourceId) continue;
+
+    const priceMin = parsePrice(item.priceFrom ?? item.price);
+    const priceMax = parsePrice(item.priceTo ?? item.price);
+    const currency = item.currency || inferCurrency(item.priceFrom || item.price) || null;
+    const tags = normalizeTagList(item.tags);
 
     const eventRecord = {
-      title: attrs.name || null,
-      description: attrs.eventDescription || attrs.description || null,
-      start_time: toMysqlDateTime(attrs.startDateTime || attrs.start_date),
-      end_time: toMysqlDateTime(attrs.endDateTime || attrs.end_date),
-      city: cityName,
-      latitude: venue.venueLat || address?.geo?.latitude || null,
-      longitude: venue.venueLng || address?.geo?.longitude || null,
-      venue_name: venue.venueName || null,
-      ticket_url: resolveUrl(resolvedBaseUrl, attrs.eventUrl),
-      age_restriction: null,
-      price_min: null,
-      price_max: null,
-      currency: null,
-      genres: (attrs.genres?.data || [])
-        .map(item => item?.attributes?.genreName || item?.attributes?.name)
-        .filter(Boolean)
-        .map(value => value.toLowerCase()),
-      tags: ['xraves'],
-      images: extractXravesImages(attrs)
+      title: item.name || item.title || null,
+      description: item.description || null,
+      start_time: parseDiceDate(item.doorsOpenDate || item.datetime || item.date_unix),
+      end_time: parseDiceDate(item.doorsCloseDate || item.endDate),
+      city: item.city || city || null,
+      latitude: item.latitude || null,
+      longitude: item.longitude || null,
+      venue_name: item.venue || item.location || item.place || null,
+      ticket_url: item.url || null,
+      age_restriction: item.ageRestriction || null,
+      price_min: priceMin,
+      price_max: priceMax,
+      currency,
+      genres: tags,
+      tags: ['dice', ...tags],
+      images: item.image ? [{ url: item.image }] : []
     };
 
     if (!eventRecord.title || !eventRecord.start_time) {
@@ -566,22 +602,23 @@ const ingestXraves = async (pool, { baseUrl, userAgent, scraperUrl, city, startD
 
     const eventId = await upsertEvent(pool, eventRecord);
     await upsertSourceEvent(pool, {
-      source: 'xraves',
-      source_id: sourceId,
+      source: 'dice',
+      source_id: String(sourceId),
       event_id: eventId,
       raw_payload: item
     });
     ingested += 1;
   }
 
-  await updateIngestState(pool, 'xraves', city || 'Ireland', startDate, endDate);
-  return { source: 'xraves', skipped: false, count: ingested };
+  await updateIngestState(pool, 'dice', city || 'Dublin', startDate, endDate);
+  return { source: 'dice', skipped: false, count: ingested };
 };
 
 module.exports = {
   ingestTicketmaster,
   ingestEventbrite,
-  ingestXraves,
+  ingestBandsintownArtists,
+  ingestDiceApify,
   upsertEvent,
   upsertSourceEvent
 };

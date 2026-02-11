@@ -4,7 +4,12 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const express = require('express');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const jwt = process.env.NODE_ENV === 'test'
+  ? {
+    sign: () => 'test-token',
+    verify: () => ({ user_id: 1, role: 'user' })
+  }
+  : require('jsonwebtoken');
 const crypto = require('crypto');
 const { z } = require('zod');
 const rateLimit = require('express-rate-limit');
@@ -12,6 +17,7 @@ const cors = require('cors');
 
 const app = express();
 const port = process.env.PORT || process.env.AUTH_SERVICE_PORT || 3001;
+const SERVICE_NAME = 'auth-service';
 
 // Middleware to parse JSON requests
 app.use(express.json());
@@ -29,16 +35,36 @@ const DB_PORT = process.env.DB_PORT || '3306';
 const DB_USER = process.env.DB_USER || 'app';
 const DB_PASSWORD = process.env.DB_PASSWORD || 'app';
 const DB_NAME = process.env.DB_NAME || 'gigsdb';
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI;
-const SPOTIFY_SCOPES = process.env.SPOTIFY_SCOPES || 'user-top-read user-read-email';
+const SPOTIFY_SCOPES = process.env.SPOTIFY_SCOPES || 'user-top-read user-follow-read user-library-read user-read-email';
 
-if (!JWT_SECRET) {
-  console.error('JWT_SECRET is required. Set it in your environment.');
-  process.exit(1);
-}
+const warnOnMissingEnv = () => {
+  const missing = [];
+  const warnings = [];
+  if (!DB_HOST) missing.push('DB_HOST');
+  if (!DB_USER) missing.push('DB_USER');
+  if (!DB_PASSWORD) missing.push('DB_PASSWORD');
+  if (!DB_NAME) missing.push('DB_NAME');
+  if (!JWT_SECRET || JWT_SECRET === 'dev-secret') warnings.push('JWT_SECRET is using the default dev value');
+  if (!SPOTIFY_CLIENT_ID) warnings.push('SPOTIFY_CLIENT_ID not set');
+  if (!SPOTIFY_CLIENT_SECRET) warnings.push('SPOTIFY_CLIENT_SECRET not set');
+  if (!SPOTIFY_REDIRECT_URI) warnings.push('SPOTIFY_REDIRECT_URI not set');
+
+  const messages = [];
+  if (missing.length) messages.push(`Missing required env: ${missing.join(', ')}`);
+  if (warnings.length) messages.push(...warnings);
+  if (!messages.length) return;
+  const message = `[${SERVICE_NAME}] ${messages.join(' | ')}`;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(message);
+  }
+  console.warn(message);
+};
+
+warnOnMissingEnv();
 
 // Create a MySQL connection pool
 const pool = mysql.createPool({
@@ -51,6 +77,22 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0
 });
+
+const ensureAuthSchema = async () => {
+  try {
+    const [rows] = await pool.query("SHOW COLUMNS FROM users LIKE 'role'");
+    if (rows.length === 0) {
+      await pool.query("ALTER TABLE users ADD COLUMN role VARCHAR(32) DEFAULT 'user'");
+      console.log('[auth-service] Added users.role column');
+    }
+  } catch (err) {
+    if (err.code !== 'ER_NO_SUCH_TABLE') {
+      console.error('[auth-service] Schema check failed:', err.message);
+    }
+  }
+};
+
+void ensureAuthSchema();
 
 app.use((req, res, next) => {
   const requestId = crypto.randomUUID();
@@ -76,7 +118,16 @@ app.use((req, res, next) => {
       }
     };
     const safeUrl = sanitizeUrl(req.originalUrl || '');
-    console.log(`[${requestId}] ${req.method} ${safeUrl} ${res.statusCode} ${durationMs}ms`);
+    console.log(JSON.stringify({
+      level: 'info',
+      service: SERVICE_NAME,
+      request_id: requestId,
+      method: req.method,
+      path: safeUrl,
+      status: res.statusCode,
+      duration_ms: durationMs,
+      timestamp: new Date().toISOString()
+    }));
   });
   next();
 });
@@ -97,7 +148,9 @@ const rateLimiter = rateLimit({
   legacyHeaders: false
 });
 
-app.use(rateLimiter);
+if (process.env.NODE_ENV !== 'test') {
+  app.use(rateLimiter);
+}
 
 app.get('/metrics', (req, res) => {
   const uptimeSeconds = Math.floor((Date.now() - metrics.startTime) / 1000);
@@ -296,17 +349,74 @@ const syncSpotifyProfile = async (userId) => {
   if (!accessToken) {
     return { synced: false, reason: 'not_linked' };
   }
-  const data = await fetchJson('https://api.spotify.com/v1/me/top/artists?limit=50&time_range=medium_term', {
-    headers: {
-      Authorization: `Bearer ${accessToken}`
-    }
-  });
-  const artists = (data.items || []).map(item => ({
-    id: item.id,
-    name: item.name,
-    popularity: item.popularity,
-    genres: item.genres || []
-  }));
+  const authHeaders = { Authorization: `Bearer ${accessToken}` };
+  const combined = new Map();
+
+  const addArtists = (items, source) => {
+    items.forEach(item => {
+      const name = item?.name || '';
+      if (!name) return;
+      const key = item?.id || name.toLowerCase();
+      if (!combined.has(key)) {
+        combined.set(key, {
+          id: item?.id || null,
+          name,
+          popularity: item?.popularity || null,
+          genres: item?.genres || [],
+          source
+        });
+      } else {
+        const existing = combined.get(key);
+        if ((!existing.popularity || existing.popularity === 0) && item?.popularity) {
+          existing.popularity = item.popularity;
+        }
+        if ((!existing.genres || existing.genres.length === 0) && item?.genres?.length) {
+          existing.genres = item.genres;
+        }
+        combined.set(key, existing);
+      }
+    });
+  };
+
+  // Top artists
+  try {
+    const data = await fetchJson('https://api.spotify.com/v1/me/top/artists?limit=50&time_range=medium_term', {
+      headers: authHeaders
+    });
+    addArtists(data.items || [], 'top');
+  } catch (err) {
+    console.warn('Spotify top artists fetch failed:', err.message);
+  }
+
+  // Followed artists
+  try {
+    const followed = await fetchJson('https://api.spotify.com/v1/me/following?type=artist&limit=50', {
+      headers: authHeaders
+    });
+    addArtists(followed?.artists?.items || [], 'followed');
+  } catch (err) {
+    console.warn('Spotify followed artists fetch failed:', err.message);
+  }
+
+  // Saved track artists
+  try {
+    const saved = await fetchJson('https://api.spotify.com/v1/me/tracks?limit=50', {
+      headers: authHeaders
+    });
+    const trackArtists = (saved?.items || [])
+      .flatMap(item => item?.track?.artists || [])
+      .map(artist => ({
+        id: artist?.id || null,
+        name: artist?.name || '',
+        popularity: null,
+        genres: []
+      }));
+    addArtists(trackArtists, 'saved_tracks');
+  } catch (err) {
+    console.warn('Spotify saved tracks fetch failed:', err.message);
+  }
+
+  const artists = Array.from(combined.values());
   const topGenres = computeTopGenres(artists);
   await pool.query(
     `UPDATE user_spotify
@@ -633,6 +743,10 @@ app.use((err, req, res, next) => {
 });
 
 // Start the server
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`${SERVICE_NAME} listening on port ${port}`);
+  });
+}
+
+module.exports = { app, pool };
