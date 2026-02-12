@@ -99,6 +99,7 @@ Checklist:
 2. Events-service defaults: `RATE_LIMIT_WINDOW_MS=60000`, `RATE_LIMIT_MAX=120`.
 3. Auth/DJ/Venue defaults: `RATE_LIMIT_WINDOW_MS=60000`, `RATE_LIMIT_MAX=120`.
 4. For stricter limits, update `.env` and restart Compose.
+5. Organizer contact workflow (events-service): `ORGANIZER_CONTACT_REQUEST_WINDOW_MS=3600000`, `ORGANIZER_CONTACT_REQUEST_MAX=10` (keyed by `user_id`).
 
 ## Incident: Aggregator returns no Ticketmaster events
 Checks:

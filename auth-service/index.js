@@ -92,7 +92,9 @@ const ensureAuthSchema = async () => {
   }
 };
 
-void ensureAuthSchema();
+if (process.env.NODE_ENV !== 'test') {
+  void ensureAuthSchema();
+}
 
 app.use((req, res, next) => {
   const requestId = crypto.randomUUID();

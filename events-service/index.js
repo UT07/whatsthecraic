@@ -180,7 +180,9 @@ const ensureEventsSchema = async () => {
   }
 };
 
-void ensureEventsSchema();
+if (process.env.NODE_ENV !== 'test') {
+  void ensureEventsSchema();
+}
 
 const app = express();
 app.use(cors());
@@ -2079,11 +2081,21 @@ app.get('/v1/organizer/plans/:id/shortlist/export', requireAuth, requireOrganize
   return res.send(lines.join('\n'));
 });
 
+const organizerContactRequestLimiter = rateLimit({
+  windowMs: parseIntOrDefault(process.env.ORGANIZER_CONTACT_REQUEST_WINDOW_MS, 60 * 60 * 1000),
+  max: parseIntOrDefault(process.env.ORGANIZER_CONTACT_REQUEST_MAX, 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.user?.user_id ?? req.ip),
+  handler: (req, res) => sendError(res, 429, 'rate_limited', 'Too many contact requests. Try again later.'),
+  skip: () => process.env.NODE_ENV === 'test'
+});
+
 app.get('/v1/organizer/contact-templates', requireAuth, requireOrganizer, async (req, res) => {
   return res.json({ templates: CONTACT_TEMPLATES });
 });
 
-app.post('/v1/organizer/contact-requests', requireAuth, requireOrganizer, async (req, res) => {
+app.post('/v1/organizer/contact-requests', requireAuth, requireOrganizer, organizerContactRequestLimiter, async (req, res) => {
   const schema = z.object({
     plan_id: z.coerce.number().int().positive().optional(),
     item_type: z.enum(['dj', 'venue']),

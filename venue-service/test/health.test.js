@@ -21,7 +21,11 @@ const withServer = async (handler) => {
   } finally {
     server.close();
     if (pool && typeof pool.end === 'function') {
-      await pool.end();
+      try {
+        await pool.end();
+      } catch {
+        // DB may not be reachable during unit smoke tests.
+      }
     }
   }
 };
