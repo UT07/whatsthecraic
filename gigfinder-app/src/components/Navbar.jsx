@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getToken, setToken, setUser, getUser } from '../services/apiClient';
 
 const Navbar = ({ setIsAuthenticated }) => {
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleLogout = () => {
     setToken(null);
@@ -19,12 +20,12 @@ const Navbar = ({ setIsAuthenticated }) => {
   return (
     <nav className="nav-shell">
       <div className="nav-inner">
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-12">
           <Link to={isAuthenticated ? '/dashboard' : '/auth/login'} className="brand">
-            WhatsTheCraic
+            🎵 WhatsTheCraic
           </Link>
           {isAuthenticated && (
-            <div className="nav-links">
+            <div className="hidden md:flex nav-links">
               <Link to="/dashboard" className="nav-link">Overview</Link>
               <Link to="/discover" className="nav-link">Discover</Link>
               <Link to="/preferences" className="nav-link">Preferences</Link>
@@ -37,17 +38,43 @@ const Navbar = ({ setIsAuthenticated }) => {
         <div className="flex items-center gap-3">
           {isAuthenticated ? (
             <>
-              <span className="chip">{user?.name || 'Member'}</span>
-              <button onClick={handleLogout} className="btn btn-outline">Logout</button>
+              <div className="hidden sm:flex items-center gap-3">
+                <span className="chip">{user?.name || 'Member'}</span>
+                <button
+                  onClick={handleLogout}
+                  className="btn btn-outline"
+                >
+                  Sign out
+                </button>
+              </div>
+              <div className="md:hidden">
+                <button
+                  onClick={() => setMenuOpen(!menuOpen)}
+                  className="btn btn-ghost"
+                >
+                  ☰
+                </button>
+              </div>
             </>
           ) : (
             <>
-              <Link to="/auth/login" className="btn btn-ghost">Login</Link>
-              <Link to="/auth/signup" className="btn btn-primary">Create Account</Link>
+              <Link to="/auth/login" className="btn btn-ghost hidden sm:inline-flex">Sign in</Link>
+              <Link to="/auth/signup" className="btn btn-primary">Get started</Link>
             </>
           )}
         </div>
       </div>
+
+      {menuOpen && isAuthenticated && (
+        <div className="md:hidden border-t border-line px-4 py-4 space-y-2">
+          <Link to="/dashboard" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Overview</Link>
+          <Link to="/discover" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Discover</Link>
+          <Link to="/preferences" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Preferences</Link>
+          <Link to="/djs" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">DJs</Link>
+          <Link to="/venues" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Venues</Link>
+          {isOrganizer && <Link to="/organizer" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Organizer</Link>}
+        </div>
+      )}
     </nav>
   );
 };

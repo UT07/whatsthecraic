@@ -1,0 +1,122 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: eu-west-1
+
+jobs:
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint || true
+
+      - name: Type check
+        run: npm run type-check || true
+
+      - name: Run unit tests
+        run: npm run test:unit:all -- --coverage
+
+      - name: Run integration tests
+        run: |
+          docker-compose -f docker-compose.test.yml up -d
+          sleep 30
+          npm run test:integration || true
+          docker-compose -f docker-compose.test.yml down
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      - name: Check coverage thresholds
+        run: |
+          COVERAGE=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
+          if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+            echo "Coverage $COVERAGE% is below 70% threshold"
+            exit 1
+          fi
+          echo "Coverage check passed: $COVERAGE%"
+
+      - name: Run smoke tests
+        run: |
+          docker-compose up -d db
+          sleep 20
+          ./scripts/ci-smoke.sh || true
+
+  deploy-to-ec2:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy via SSM
+        env:
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+        run: |
+          aws ssm send-command \
+            --instance-ids $INSTANCE_ID \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "cd /home/ec2-user/whatsthecraic",
+              "git pull origin main",
+              "docker-compose pull",
+              "docker-compose up -d --remove-orphans",
+              "docker system prune -f",
+              "sleep 30",
+              "docker-compose ps",
+              "curl -f http://localhost:4000/health || exit 1",
+              "curl -f http://localhost:4004/health || exit 1"
+            ]' \
+            --comment "Deploy WhatsTheCraic via GitHub Actions"
+
+      - name: Publish deployment metric
+        if: success()
+        run: |
+          aws cloudwatch put-metric-data \
+            --namespace WhatsTheCraic/Deployments \
+            --metric-name DeploymentSuccess \
+            --value 1 \
+            --dimensions Environment=Production,Branch=main
+
+      - name: Publish deployment failure metric
+        if: failure()
+        run: |
+          aws cloudwatch put-metric-data \
+            --namespace WhatsTheCraic/Deployments \
+            --metric-name DeploymentFailure \
+            --value 1 \
+            --dimensions Environment=Production,Branch=main

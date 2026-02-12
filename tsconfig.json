@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@whatsthecraic/shared-lib": ["packages/shared-lib/src"],
+      "@whatsthecraic/shared-lib/*": ["packages/shared-lib/src/*"]
+    }
+  }
+}

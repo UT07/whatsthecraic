@@ -123,6 +123,35 @@ services:
       timeout: 5s
       retries: 10
 
+  ml-service:
+    build:
+      context: ./ml-service
+    container_name: ml_service
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-app}
+      DB_PASSWORD: ${DB_PASSWORD:-app}
+      DB_NAME: ${DB_NAME:-gigsdb}
+      AWS_REGION: ${AWS_REGION:-eu-west-1}
+      ENABLE_CLOUDWATCH: ${ENABLE_CLOUDWATCH:-true}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    ports:
+      - "4004:4004"
+    volumes:
+      - ml_models:/app/models
+      - ml_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4004/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
   aggregator:
     build:
       context: ./aggregator-service
@@ -133,6 +162,7 @@ services:
       VENUE_SERVICE_URL: ${VENUE_SERVICE_URL:-http://venue-service:4001}
       DJ_SERVICE_URL: ${DJ_SERVICE_URL:-http://dj-service:4002}
       LOCAL_EVENTS_URL: ${LOCAL_EVENTS_URL:-http://events-service:4003}
+      ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml-service:4004}
       TICKETMASTER_API_KEY: ${TICKETMASTER_API_KEY}
       PORT: ${AGGREGATOR_PORT:-4000}
     ports:
@@ -143,6 +173,8 @@ services:
       dj-service:
         condition: service_healthy
       venue-service:
+        condition: service_healthy
+      ml-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
@@ -171,3 +203,5 @@ volumes:
   db_data:
   caddy_data:
   caddy_config:
+  ml_models:
+  ml_data:

@@ -171,16 +171,17 @@ const CombinedGigs = () => {
 
   return (
     <div className="space-y-8">
-      <section className="card">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      {/* Header Section */}
+      <section>
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-8">
           <div>
-            <div className="badge mb-2">Discover</div>
-            <h1 className="section-title">Your next night out</h1>
+            <div className="badge mb-3">Discover Events</div>
+            <h1 className="section-title mb-2">Find your next night out</h1>
             <p className="section-subtitle">
-              Personalize with Spotify, or run a targeted search across Dublin and beyond.
+              Explore events across Ireland or use filters for a targeted search.
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             {token && (
               <a
                 className="btn btn-outline"
@@ -188,13 +189,14 @@ const CombinedGigs = () => {
                 target="_blank"
                 rel="noreferrer"
               >
-                Export Saved Calendar
+                📅 Export Calendar
               </a>
             )}
             <button
               className={`btn ${mode === 'feed' ? 'btn-primary' : 'btn-outline'}`}
               onClick={() => setMode('feed')}
               disabled={!token}
+              title={!token ? 'Sign in to use For You' : ''}
             >
               For You
             </button>
@@ -207,7 +209,9 @@ const CombinedGigs = () => {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        {/* Search Filters Card */}
+        <div className="card space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <input
             className="input"
             placeholder="Search keyword"
@@ -243,22 +247,24 @@ const CombinedGigs = () => {
             value={filters.source}
             onChange={(e) => setFilters({ ...filters, source: e.target.value })}
           >
-            <option value="">All sources</option>
+            <option value="">All ticket sources</option>
             <option value="ticketmaster">Ticketmaster</option>
             <option value="eventbrite">Eventbrite</option>
             <option value="bandsintown">Bandsintown</option>
             <option value="dice">Dice.fm</option>
-            <option value="local">Manual</option>
+            <option value="local">Local listings</option>
           </select>
           <input
             className="input"
             type="date"
+            placeholder="From date"
             value={filters.from}
             onChange={(e) => setFilters({ ...filters, from: e.target.value })}
           />
           <input
             className="input"
             type="date"
+            placeholder="To date"
             value={filters.to}
             onChange={(e) => setFilters({ ...filters, to: e.target.value })}
           />
@@ -269,42 +275,43 @@ const CombinedGigs = () => {
             value={filters.priceMax}
             onChange={(e) => setFilters({ ...filters, priceMax: e.target.value })}
           />
-        </div>
+          </div>
 
-        <div className="mt-6 flex flex-wrap gap-3">
-          <button className="btn btn-primary" onClick={mode === 'feed' ? loadFeed : runSearch}>
-            {mode === 'feed' ? 'Refresh Feed' : 'Run Search'}
-          </button>
-          <button
-            className="btn btn-outline"
-            onClick={() => setFilters({
-              city: '',
-              from: '',
-              to: '',
-              genres: '',
-              q: '',
-              artist: '',
-              venue: '',
-              priceMax: '',
-              source: ''
-            })}
-          >
-            Clear filters
-          </button>
-          {!token && <span className="chip">Login to unlock "For You"</span>}
+          <div className="flex flex-wrap gap-3 pt-2">
+            <button className="btn btn-primary flex-1 sm:flex-none" onClick={mode === 'feed' ? loadFeed : runSearch}>
+              {mode === 'feed' ? '🔄 Refresh Feed' : '🔍 Search'}
+            </button>
+            <button
+              className="btn btn-outline"
+              onClick={() => setFilters({
+                city: '',
+                from: '',
+                to: '',
+                genres: '',
+                q: '',
+                artist: '',
+                venue: '',
+                priceMax: '',
+                source: ''
+              })}
+            >
+              Clear all
+            </button>
+            {!token && <span className="chip">Sign in to unlock personalized feed</span>}
+          </div>
         </div>
       </section>
 
       {token && (
         <section className="card space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <div className="badge mb-2">Alerts</div>
-              <h2 className="section-title text-base">Artist alerts</h2>
-              <p className="section-subtitle">Get notified when a tracked artist announces a new event in your city.</p>
+              <h2 className="text-lg font-bold mb-1">Artist alerts</h2>
+              <p className="text-muted text-sm">Get notified when your favorite artists announce new events.</p>
             </div>
             <button className="btn btn-outline" onClick={checkAlerts} disabled={alertsLoading}>
-              {alertsLoading ? 'Checking…' : 'Check alerts'}
+              {alertsLoading ? '⏳ Checking…' : '🔔 Check alerts'}
             </button>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
@@ -366,8 +373,8 @@ const CombinedGigs = () => {
         <section className="card space-y-4">
           <div>
             <div className="badge mb-2">Saved</div>
-            <h2 className="section-title text-base">Saved events</h2>
-            <p className="section-subtitle">Your shortlist of events to revisit.</p>
+            <h2 className="text-lg font-bold mb-1">Saved events</h2>
+            <p className="text-muted text-sm">Your shortlist of events to revisit later.</p>
           </div>
           {savedEvents.length === 0 ? (
             <div className="text-muted text-sm">No saved events yet.</div>
@@ -398,8 +405,8 @@ const CombinedGigs = () => {
         <section className="card space-y-4">
           <div>
             <div className="badge mb-2">Hidden</div>
-            <h2 className="section-title text-base">Hidden events</h2>
-            <p className="section-subtitle">Review and restore anything you hid from your feed.</p>
+            <h2 className="text-lg font-bold mb-1">Hidden events</h2>
+            <p className="text-muted text-sm">Easily restore events you dismissed from your feed.</p>
           </div>
           {hiddenEvents.length === 0 ? (
             <div className="text-muted text-sm">No hidden events yet.</div>
@@ -421,77 +428,118 @@ const CombinedGigs = () => {
         </section>
       )}
 
-      <section className="grid-auto">
+      <section>
         {loading ? (
-          <div className="card text-center text-muted">Loading events…</div>
+          <div className="flex items-center justify-center min-h-96">
+            <div className="text-center">
+              <div className="inline-block w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin mb-4"></div>
+              <p className="text-muted">Loading events…</p>
+            </div>
+          </div>
         ) : events.length === 0 ? (
-          <div className="card text-center text-muted">No events found for these filters.</div>
+          <div className="card text-center py-16">
+            <p className="text-2xl mb-2">🎭</p>
+            <p className="text-lg font-semibold mb-2">No events found</p>
+            <p className="text-muted">Try adjusting your filters or search criteria.</p>
+          </div>
         ) : (
-          events.map((event, index) => {
-            const image = event.images?.[0]?.url;
-            const saved = savedIds.has(event.id);
-            return (
-              <motion.article
-                key={`${event.id}-${index}`}
-                className="card flex flex-col gap-4"
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, delay: index * 0.03 }}
-              >
-                {image && (
-                  <div
-                    className="w-full h-40 rounded-xl bg-cover bg-center"
-                    style={{ backgroundImage: `url(${image})` }}
-                  />
-                )}
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <h2 className="text-lg font-semibold">{event.title}</h2>
-                    <p className="text-muted text-sm">{event.venue_name || 'Venue TBA'}</p>
+          <div className="grid-auto">
+            {events.map((event, index) => {
+              const image = event.images?.[0]?.url;
+              const saved = savedIds.has(event.id);
+              return (
+                <motion.article
+                  key={`${event.id}-${index}`}
+                  className="card overflow-hidden flex flex-col h-full hover:scale-105 transition-transform duration-200"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25, delay: index * 0.03 }}
+                >
+                  {/* Event Image */}
+                  {image && (
+                    <div
+                      className="w-full h-48 bg-cover bg-center -m-6 mb-4"
+                      style={{ backgroundImage: `url(${image})` }}
+                    />
+                  )}
+                  {!image && (
+                    <div className="w-full h-48 bg-gradient-to-br from-accent/10 to-accent-3/10 flex items-center justify-center -m-6 mb-4">
+                      <span className="text-4xl">🎵</span>
+                    </div>
+                  )}
+
+                  {/* Event Details */}
+                  <div className="flex-1 flex flex-col">
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <h2 className="text-lg font-bold leading-snug flex-1">{event.title}</h2>
+                      <span className="chip whitespace-nowrap">{event.city || 'Ireland'}</span>
+                    </div>
+
+                    <p className="text-muted text-sm font-medium mb-3">{event.venue_name || 'Venue TBA'}</p>
+
+                    {/* Date & Time */}
+                    <div className="flex items-center gap-2 text-sm font-medium text-accent mb-3">
+                      <span>📅</span>
+                      <span>{formatDate(event.start_time)}</span>
+                    </div>
+
+                    {/* Genres */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {(event.genres || []).slice(0, 2).map((genre) => (
+                        <span key={genre} className="chip">{genre}</span>
+                      ))}
+                      {(event.tags || []).slice(0, 1).map((tag) => (
+                        <span key={tag} className="chip">{tag}</span>
+                      ))}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-col gap-2 mt-auto pt-4 border-t border-line">
+                      <button
+                        className={`btn w-full ${saved ? 'btn-outline' : 'btn-primary'}`}
+                        onClick={() => handleSave(event.id)}
+                      >
+                        {saved ? '❤️ Saved' : '🤍 Save'}
+                      </button>
+                      <div className="flex gap-2">
+                        {event.ticket_url && (
+                          <a
+                            className="btn btn-outline flex-1 text-sm"
+                            href={event.ticket_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            🎫 Tickets
+                          </a>
+                        )}
+                        <a
+                          className="btn btn-outline flex-1 text-sm"
+                          href={eventsAPI.getEventCalendarUrl(event.id)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          📅 Calendar
+                        </a>
+                      </div>
+                      {token && (
+                        <button
+                          className="btn btn-ghost text-sm"
+                          onClick={() => handleHide(event)}
+                        >
+                          👁️ Hide this
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Source */}
+                    <p className="text-xs text-muted mt-3 pt-3 border-t border-line/50">
+                      {(event.sources || []).map(source => source.source).join(', ') || 'local'}
+                    </p>
                   </div>
-                  <span className="chip">{event.city || 'Ireland'}</span>
-                </div>
-                <div className="text-sm text-muted">{formatDate(event.start_time)}</div>
-                <div className="flex flex-wrap gap-2">
-                  {(event.genres || []).slice(0, 3).map((genre) => (
-                    <span key={genre} className="chip">{genre}</span>
-                  ))}
-                  {(event.tags || []).slice(0, 2).map((tag) => (
-                    <span key={tag} className="chip">{tag}</span>
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-3 mt-auto">
-                  <a
-                    className="btn btn-outline"
-                    href={eventsAPI.getEventCalendarUrl(event.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Add to calendar
-                  </a>
-                  {event.ticket_url && (
-                    <a className="btn btn-outline" href={event.ticket_url} target="_blank" rel="noreferrer">
-                      Tickets
-                    </a>
-                  )}
-                  {token && (
-                    <button className="btn btn-ghost" onClick={() => handleHide(event)}>
-                      Hide
-                    </button>
-                  )}
-                  <button
-                    className={`btn ${saved ? 'btn-outline' : 'btn-primary'}`}
-                    onClick={() => handleSave(event.id)}
-                  >
-                    {saved ? 'Saved' : 'Save'}
-                  </button>
-                </div>
-                <div className="text-xs text-muted">
-                  Sources: {(event.sources || []).map(source => source.source).join(', ') || 'local'}
-                </div>
-              </motion.article>
-            );
-          })
+                </motion.article>
+              );
+            })}
+          </div>
         )}
       </section>
     </div>
