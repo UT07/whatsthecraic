@@ -99,6 +99,24 @@ const warnOnMissingEnv = () => {
 
 warnOnMissingEnv();
 
+// Ensure image_url column exists on venues table
+const ensureVenueSchema = async () => {
+  try {
+    const [cols] = await pool.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'venues' AND COLUMN_NAME = 'image_url'`,
+      [DB_NAME]
+    );
+    if (cols.length === 0) {
+      await pool.query('ALTER TABLE venues ADD COLUMN image_url TEXT DEFAULT NULL');
+      console.log(`[${SERVICE_NAME}] Added image_url column to venues table`);
+    }
+  } catch (err) {
+    console.warn(`[${SERVICE_NAME}] Schema migration warning:`, err.message);
+  }
+};
+ensureVenueSchema();
+
 const rateLimiter = rateLimit({
   windowMs: parseIntOrDefault(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
   max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 120),
@@ -346,19 +364,20 @@ app.post('/venues', async (req, res) => {
     genreFocus: z.string().optional(),
     latitude: z.coerce.number().optional(),
     longitude: z.coerce.number().optional(),
-    notes: z.string().optional()
+    notes: z.string().optional(),
+    image_url: z.string().url().optional().nullable()
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     return sendError(res, 400, 'invalid_body', 'Invalid request body', parsed.error.flatten());
   }
-  const { id, name, address, capacity, genreFocus, latitude, longitude, notes } = parsed.data;
+  const { id, name, address, capacity, genreFocus, latitude, longitude, notes, image_url } = parsed.data;
 
   try {
     await pool.query(
       `INSERT INTO venues
-        (id, name, address, capacity, genreFocus, latitude, longitude, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, name, address, capacity, genreFocus, latitude, longitude, notes, image_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         name,
@@ -368,6 +387,7 @@ app.post('/venues', async (req, res) => {
         latitude || 53.0,
         longitude || -6.0,
         notes || '',
+        image_url || null,
       ]
     );
 
@@ -393,13 +413,14 @@ app.put('/venues/:id', async (req, res) => {
     genreFocus: z.string().optional(),
     latitude: z.coerce.number().optional(),
     longitude: z.coerce.number().optional(),
-    notes: z.string().optional()
+    notes: z.string().optional(),
+    image_url: z.string().url().optional().nullable()
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     return sendError(res, 400, 'invalid_body', 'Invalid request body', parsed.error.flatten());
   }
-  const { name, address, capacity, genreFocus, latitude, longitude, notes } = parsed.data;
+  const { name, address, capacity, genreFocus, latitude, longitude, notes, image_url } = parsed.data;
 
   try {
     // Check if the venue exists
@@ -410,7 +431,7 @@ app.put('/venues/:id', async (req, res) => {
 
     await pool.query(
       `UPDATE venues
-         SET name = ?, address = ?, capacity = ?, genreFocus = ?, latitude = ?, longitude = ?, notes = ?
+         SET name = ?, address = ?, capacity = ?, genreFocus = ?, latitude = ?, longitude = ?, notes = ?, image_url = ?
        WHERE id = ?`,
       [
         name,
@@ -420,6 +441,7 @@ app.put('/venues/:id', async (req, res) => {
         latitude || 53.0,
         longitude || -6.0,
         notes || '',
+        image_url !== undefined ? image_url : existing[0].image_url,
         venueId
       ]
     );

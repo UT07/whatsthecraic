@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import eventsAPI from '../services/eventsAPI';
 import { getToken } from '../services/apiClient';
+import { getBestImage } from '../utils/imageUtils';
 
 const formatDate = (iso) => {
   if (!iso) return 'TBA';
@@ -17,8 +18,46 @@ const formatTime = (iso) => {
   return d.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
 };
 
+/* ─── MATCH REASON BADGE ─── */
+const MatchBadge = ({ reasons, score }) => {
+  if (!reasons && !score) return null;
+  const reasonList = typeof reasons === 'string' ? reasons.split(',').map(r => r.trim()) : (reasons || []);
+  const topReason = reasonList[0];
+  if (!topReason && !score) return null;
+
+  const label = topReason === 'genre_match' ? 'Genre match'
+    : topReason === 'artist_match' ? 'Artist you follow'
+    : topReason === 'venue_match' ? 'Favourite venue'
+    : topReason === 'city_match' ? 'Your city'
+    : topReason === 'collaborative' ? 'Fans like you'
+    : topReason === 'popularity' ? 'Trending'
+    : score > 0.7 ? 'Top pick'
+    : score > 0.4 ? 'Good match'
+    : null;
+
+  if (!label) return null;
+
+  const color = topReason === 'genre_match' ? 'var(--violet)'
+    : topReason === 'artist_match' ? '#1DB954'
+    : topReason === 'collaborative' ? 'var(--sky)'
+    : 'var(--emerald)';
+
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+      padding: '0.2rem 0.55rem', borderRadius: 6,
+      background: `${color}18`, color,
+      fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase',
+      letterSpacing: '0.5px', marginBottom: '0.3rem'
+    }}>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
+      {label}
+    </span>
+  );
+};
+
 const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
-  const image = event.images?.[0]?.url;
+  const image = getBestImage(event.images, 'card', 400);
   return (
     <motion.article
       className="card-event"
@@ -41,6 +80,18 @@ const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
             {formatDate(event.start_time)} {formatTime(event.start_time) && `\u00B7 ${formatTime(event.start_time)}`}
           </span>
         </div>
+        {/* Match score badge on image */}
+        {event.rank_score > 0 && (
+          <div style={{
+            position: 'absolute', top: 10, left: 10, zIndex: 3,
+            padding: '0.2rem 0.5rem', borderRadius: 6,
+            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+            color: event.rank_score > 0.7 ? 'var(--emerald)' : event.rank_score > 0.4 ? 'var(--gold)' : 'var(--muted)',
+            fontSize: '0.65rem', fontWeight: 800
+          }}>
+            {Math.round(event.rank_score * 100)}% match
+          </div>
+        )}
         {token && (
           <button
             onClick={(e) => { e.stopPropagation(); onSave(event.id); }}
@@ -59,6 +110,7 @@ const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
         )}
       </div>
       <div className="card-event-body">
+        <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
         <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: '0.35rem' }}>
           {event.title}
         </h3>
@@ -113,10 +165,11 @@ const CombinedGigs = () => {
   const [savedEvents, setSavedEvents] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   const [activeTab, setActiveTab] = useState('events');
+  const [resultInfo, setResultInfo] = useState({ ranked: false, count: 0 });
 
   const [filters, setFilters] = useState({
     city: '', from: '', to: '', genres: '', q: '',
-    artist: '', venue: '', priceMax: '', source: ''
+    artist: '', venue: '', priceMax: '', source: '', limit: '200'
   });
 
   const activeFilters = useMemo(() => {
@@ -130,6 +183,7 @@ const CombinedGigs = () => {
     try {
       const data = await eventsAPI.getFeed(activeFilters);
       setEvents(data.events || []);
+      setResultInfo({ ranked: data.ranked || false, count: data.count || 0 });
     } catch { setEvents([]); }
     finally { setLoading(false); }
   };
@@ -139,6 +193,7 @@ const CombinedGigs = () => {
     try {
       const data = await eventsAPI.searchEvents(activeFilters);
       setEvents(data.events || []);
+      setResultInfo({ ranked: data.ranked || false, count: data.count || 0 });
     } catch { setEvents([]); }
     finally { setLoading(false); }
   };
@@ -210,6 +265,8 @@ const CombinedGigs = () => {
 
   const clearFilters = () => setFilters({ city: '', from: '', to: '', genres: '', q: '', artist: '', venue: '', priceMax: '', source: '' });
 
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -253,9 +310,21 @@ const CombinedGigs = () => {
               onKeyDown={(e) => e.key === 'Enter' && (mode === 'feed' ? loadFeed() : runSearch())}
             />
           </div>
-          <button className="btn btn-outline btn-sm" onClick={() => setShowFilters(!showFilters)}>
+          <button className="btn btn-outline btn-sm" onClick={() => setShowFilters(!showFilters)}
+            style={{ position: 'relative' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>
             Filters
+            {activeFilterCount > 0 && (
+              <span style={{
+                position: 'absolute', top: -4, right: -4,
+                width: 18, height: 18, borderRadius: 9,
+                background: 'var(--emerald)', color: '#000',
+                fontSize: '0.6rem', fontWeight: 800,
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                {activeFilterCount}
+              </span>
+            )}
           </button>
           <button className="btn btn-primary btn-sm" onClick={mode === 'feed' ? loadFeed : runSearch}>
             Search
@@ -263,31 +332,56 @@ const CombinedGigs = () => {
         </div>
 
         {/* Expanded filters */}
-        {showFilters && (
-          <motion.div className="card" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-            style={{ marginBottom: '1rem' }}>
-            <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-              <input className="input" placeholder="City" value={filters.city} onChange={(e) => setFilters({ ...filters, city: e.target.value })} />
-              <input className="input" placeholder="Artist" value={filters.artist} onChange={(e) => setFilters({ ...filters, artist: e.target.value })} />
-              <input className="input" placeholder="Genres" value={filters.genres} onChange={(e) => setFilters({ ...filters, genres: e.target.value })} />
-              <input className="input" placeholder="Venue" value={filters.venue} onChange={(e) => setFilters({ ...filters, venue: e.target.value })} />
-              <select className="input" value={filters.source} onChange={(e) => setFilters({ ...filters, source: e.target.value })}>
-                <option value="">All sources</option>
-                <option value="ticketmaster">Ticketmaster</option>
-                <option value="eventbrite">Eventbrite</option>
-                <option value="bandsintown">Bandsintown</option>
-                <option value="dice">Dice.fm</option>
-                <option value="local">Local</option>
-              </select>
-              <input className="input" type="number" placeholder="Max price (EUR)" value={filters.priceMax} onChange={(e) => setFilters({ ...filters, priceMax: e.target.value })} />
-              <input className="input" type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
-              <input className="input" type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-              <button className="btn btn-ghost btn-sm" onClick={clearFilters}>Clear all</button>
-              {!token && <span className="chip">Sign in for personalized feed</span>}
-            </div>
-          </motion.div>
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div className="card"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              style={{ marginBottom: '1rem', overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+                <input className="input" placeholder="City" value={filters.city} onChange={(e) => setFilters({ ...filters, city: e.target.value })} />
+                <input className="input" placeholder="Artist" value={filters.artist} onChange={(e) => setFilters({ ...filters, artist: e.target.value })} />
+                <input className="input" placeholder="Genres" value={filters.genres} onChange={(e) => setFilters({ ...filters, genres: e.target.value })} />
+                <input className="input" placeholder="Venue" value={filters.venue} onChange={(e) => setFilters({ ...filters, venue: e.target.value })} />
+                <select className="input" value={filters.source} onChange={(e) => setFilters({ ...filters, source: e.target.value })}>
+                  <option value="">All sources</option>
+                  <option value="ticketmaster">Ticketmaster</option>
+                  <option value="eventbrite">Eventbrite</option>
+                  <option value="bandsintown">Bandsintown</option>
+                  <option value="dice">Dice.fm</option>
+                  <option value="local">Local</option>
+                </select>
+                <input className="input" type="number" placeholder="Max price (EUR)" value={filters.priceMax} onChange={(e) => setFilters({ ...filters, priceMax: e.target.value })} />
+                <input className="input" type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+                <input className="input" type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', alignItems: 'center' }}>
+                <button className="btn btn-ghost btn-sm" onClick={clearFilters}>Clear all</button>
+                {!token && <span className="chip">Sign in for personalized feed</span>}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Results summary */}
+        {!loading && events.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
+              {resultInfo.count || events.length} events
+            </span>
+            {resultInfo.ranked && (
+              <span className="badge" style={{ fontSize: '0.6rem' }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
+                Personalized
+              </span>
+            )}
+            {mode === 'feed' && token && (
+              <span style={{ fontSize: '0.72rem', color: 'var(--muted-2)' }}>
+                Ranked by your preferences
+              </span>
+            )}
+          </div>
         )}
       </section>
 
@@ -366,7 +460,11 @@ const CombinedGigs = () => {
         <section className="animate-fade-in">
           {savedEvents.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-              <p style={{ color: 'var(--muted)' }}>No saved events yet. Save events with the heart button.</p>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--muted-2)', margin: '0 auto 1rem' }}>
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              </svg>
+              <p style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '0.3rem' }}>No saved events yet</p>
+              <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Save events with the heart button to find them here later</p>
             </div>
           ) : (
             <div className="grid-events">
@@ -389,9 +487,14 @@ const CombinedGigs = () => {
             <div style={{ display: 'grid', gap: '0.5rem' }}>
               {hiddenEvents.map(event => (
                 <div key={event.id} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1rem' }}>
-                  <div>
-                    <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>{event.title}</span>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--muted)', marginLeft: '0.75rem' }}>{formatDate(event.start_time)}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {event.images?.length > 0 && (
+                      <img src={getBestImage(event.images, 'thumb', 80)} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
+                    )}
+                    <div>
+                      <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>{event.title}</span>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--muted)', marginLeft: '0.75rem' }}>{formatDate(event.start_time)}</span>
+                    </div>
                   </div>
                   <button className="btn btn-outline btn-sm" onClick={() => handleUnhide(event.id)}>Restore</button>
                 </div>
@@ -404,28 +507,43 @@ const CombinedGigs = () => {
       {/* Events Grid */}
       {activeTab === 'events' && (
         <section>
-          {loading ? (
-            <div style={{ display: 'grid', gap: '1.25rem', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="skeleton" style={{ height: 320, borderRadius: 14 }} />
-              ))}
-            </div>
-          ) : events.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--muted-2)', margin: '0 auto 1rem' }}>
-                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <p style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '0.35rem' }}>No events found</p>
-              <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Try adjusting your filters or search terms</p>
-            </div>
-          ) : (
-            <div className="grid-events">
-              {events.map((event, i) => (
-                <EventCard key={`${event.id}-${i}`} event={event} index={i}
-                  saved={savedIds.has(event.id)} onSave={handleSave} onHide={handleHide} token={token} />
-              ))}
-            </div>
-          )}
+          <AnimatePresence mode="wait">
+            {loading ? (
+              <motion.div
+                key="loading"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                style={{ display: 'grid', gap: '1.25rem', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+                {[...Array(8)].map((_, i) => (
+                  <div key={i} className="skeleton" style={{ height: 320, borderRadius: 14 }} />
+                ))}
+              </motion.div>
+            ) : events.length === 0 ? (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--muted-2)', margin: '0 auto 1rem' }}>
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <p style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '0.35rem' }}>No events found</p>
+                <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Try adjusting your filters or search terms</p>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="events"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="grid-events">
+                {events.map((event, i) => (
+                  <EventCard key={`${event.id}-${i}`} event={event} index={i}
+                    saved={savedIds.has(event.id)} onSave={handleSave} onHide={handleHide} token={token} />
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </section>
       )}
     </div>

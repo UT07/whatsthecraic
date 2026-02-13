@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import eventsAPI from '../services/eventsAPI';
 import djAPI from '../services/djAPI';
 import venueAPI from '../services/venueAPI';
 import authAPI from '../services/authAPI';
 import { getToken } from '../services/apiClient';
+import { getBestImage } from '../utils/imageUtils';
 
 const formatDate = (iso) => {
   if (!iso) return 'TBA';
@@ -21,10 +22,48 @@ const formatTime = (iso) => {
   return d.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
 };
 
-const GENRE_FILTERS = ['All', 'Electronic', 'Techno', 'House', 'Trad', 'Rock', 'Hip-Hop', 'Jazz', 'Pop', 'Folk'];
+const GENRE_FILTERS = ['All', 'Electronic', 'Techno', 'House', 'Trad', 'Rock', 'Hip-Hop', 'Jazz', 'Pop', 'Folk', 'Comedy'];
+
+/* ─── MATCH REASON BADGE ─── */
+const MatchBadge = ({ reasons, score }) => {
+  if (!reasons && !score) return null;
+  const reasonList = typeof reasons === 'string' ? reasons.split(',').map(r => r.trim()) : (reasons || []);
+  const topReason = reasonList[0];
+  if (!topReason && !score) return null;
+
+  const label = topReason === 'genre_match' ? 'Genre match'
+    : topReason === 'artist_match' ? 'Artist you follow'
+    : topReason === 'venue_match' ? 'Favourite venue'
+    : topReason === 'city_match' ? 'Your city'
+    : topReason === 'collaborative' ? 'Fans like you'
+    : topReason === 'popularity' ? 'Trending'
+    : score > 0.7 ? 'Top pick'
+    : score > 0.4 ? 'Good match'
+    : null;
+
+  if (!label) return null;
+
+  const color = topReason === 'genre_match' ? 'var(--violet)'
+    : topReason === 'artist_match' ? '#1DB954'
+    : topReason === 'collaborative' ? 'var(--sky)'
+    : 'var(--emerald)';
+
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+      padding: '0.2rem 0.55rem', borderRadius: 6,
+      background: `${color}18`, color,
+      fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase',
+      letterSpacing: '0.5px'
+    }}>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
+      {label}
+    </span>
+  );
+};
 
 const EventCard = ({ event, index, saved, onSave }) => {
-  const image = event.images?.[0]?.url;
+  const image = getBestImage(event.images, 'card', 400);
   return (
     <motion.div
       className="card-event"
@@ -49,7 +88,9 @@ const EventCard = ({ event, index, saved, onSave }) => {
         </div>
       </div>
       <div className="card-event-body">
-        <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: '0.35rem' }}>
+        {/* ML match reason */}
+        <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
+        <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: '0.35rem', marginTop: event.rank_reasons || event.rank_score ? '0.35rem' : 0 }}>
           {event.title}
         </h3>
         <div className="venue-strip">
@@ -83,7 +124,7 @@ const EventCard = ({ event, index, saved, onSave }) => {
 
 const HeroBanner = ({ event }) => {
   if (!event) return null;
-  const image = event.images?.[0]?.url;
+  const image = getBestImage(event.images, 'hero', 1200);
   return (
     <Link to="/discover" className="hero-banner" style={{ minHeight: 380 }}>
       {image ? (
@@ -108,7 +149,7 @@ const HeroBanner = ({ event }) => {
 
 const SmallHeroCard = ({ event }) => {
   if (!event) return null;
-  const image = event.images?.[0]?.url;
+  const image = getBestImage(event.images, 'card', 600);
   return (
     <Link to="/discover" className="hero-banner" style={{ minHeight: 180 }}>
       {image ? (
@@ -127,12 +168,96 @@ const SmallHeroCard = ({ event }) => {
   );
 };
 
+/* ─── SPOTIFY PROFILE WIDGET ─── */
+const SpotifyProfileWidget = ({ profile, status, onSync }) => {
+  if (!profile && !status?.linked) return null;
+
+  const topGenres = profile?.top_genres?.slice(0, 5) || [];
+  const topArtists = profile?.top_artists?.slice(0, 4) || [];
+
+  return (
+    <motion.div
+      className="card"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={{
+        background: 'linear-gradient(135deg, rgba(29, 185, 84, 0.06) 0%, rgba(0,0,0,0) 100%)',
+        borderColor: 'rgba(29, 185, 84, 0.15)',
+        padding: '1.25rem'
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', marginBottom: topGenres.length > 0 ? '1rem' : 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 10,
+            background: 'rgba(29, 185, 84, 0.15)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#1DB954', flexShrink: 0
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381C8.88 5.82 15.78 6.12 20.1 8.82c.54.3.72 1.02.42 1.56-.299.421-1.02.599-1.439.3z" />
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>
+              Spotify connected
+              <span style={{ color: '#1DB954', marginLeft: '0.4rem', fontSize: '0.75rem', fontWeight: 600 }}>&#10003;</span>
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>
+              {status?.last_synced_at ? `Synced ${new Date(status.last_synced_at).toLocaleDateString('en-IE')}` : 'Events matched to your taste'}
+            </div>
+          </div>
+        </div>
+        <button className="btn btn-sm btn-ghost" onClick={onSync} style={{ fontSize: '0.78rem', flexShrink: 0 }}>
+          Sync now
+        </button>
+      </div>
+
+      {/* Top genres */}
+      {topGenres.length > 0 && (
+        <div style={{ marginBottom: topArtists.length > 0 ? '0.75rem' : 0 }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.5rem' }}>
+            Your top genres
+          </div>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            {topGenres.map(g => (
+              <span key={g} className="chip chip-active" style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem' }}>
+                {g}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Top artists */}
+      {topArtists.length > 0 && (
+        <div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.5rem' }}>
+            Your top artists
+          </div>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            {topArtists.map(a => {
+              const name = typeof a === 'string' ? a : a.name || a;
+              return (
+                <span key={name} className="chip" style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem', borderColor: 'rgba(29, 185, 84, 0.2)' }}>
+                  {name}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+};
+
 const Dashboard = () => {
   const [events, setEvents] = useState([]);
   const [feedEvents, setFeedEvents] = useState([]);
   const [djs, setDjs] = useState([]);
   const [venues, setVenues] = useState([]);
   const [spotifyStatus, setSpotifyStatus] = useState(null);
+  const [spotifyProfile, setSpotifyProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeGenre, setActiveGenre] = useState('All');
   const [savedIds, setSavedIds] = useState(new Set());
@@ -145,11 +270,11 @@ const Dashboard = () => {
       setLoading(true);
       try {
         const requests = [
-          eventsAPI.searchEvents({}),
+          eventsAPI.searchEvents({ limit: 200 }),
           djAPI.getAllDJs(),
           venueAPI.getAllVenues()
         ];
-        if (token) requests.push(eventsAPI.getFeed({}));
+        if (token) requests.push(eventsAPI.getFeed({ limit: 20 }));
 
         const results = await Promise.all(requests);
         setEvents(results[0].events || []);
@@ -170,6 +295,9 @@ const Dashboard = () => {
     authAPI.getSpotifyStatus()
       .then(setSpotifyStatus)
       .catch(() => setSpotifyStatus(null));
+    authAPI.getSpotifyProfile()
+      .then(setSpotifyProfile)
+      .catch(() => setSpotifyProfile(null));
   }, [token]);
 
   const handleSave = async (id) => {
@@ -179,8 +307,17 @@ const Dashboard = () => {
     } catch (e) { console.error('Save failed:', e); }
   };
 
+  const handleSyncSpotify = () => {
+    authAPI.syncSpotify()
+      .then(() => {
+        authAPI.getSpotifyStatus().then(setSpotifyStatus).catch(() => {});
+        authAPI.getSpotifyProfile().then(setSpotifyProfile).catch(() => {});
+      })
+      .catch(() => {});
+  };
+
   // Prioritize events with images
-  const eventsWithImages = events.filter(e => e.images?.[0]?.url);
+  const eventsWithImages = events.filter(e => e.images?.length > 0);
   const heroEvents = eventsWithImages.length >= 3 ? eventsWithImages : events;
 
   // Filter events by genre
@@ -188,7 +325,7 @@ const Dashboard = () => {
     ? events
     : events.filter(e => (e.genres || []).some(g => g.toLowerCase().includes(activeGenre.toLowerCase())));
 
-  // Personalized or trending
+  // Personalized or trending - prefer feed events which have ML ranking
   const personalizedEvents = feedEvents.length > 0 ? feedEvents : events;
 
   // Upcoming events sorted
@@ -218,7 +355,7 @@ const Dashboard = () => {
         <SmallHeroCard event={heroEvents[2]} />
       </section>
 
-      {/* ─── SPOTIFY CTA ─── */}
+      {/* ─── SPOTIFY CTA (not linked) ─── */}
       {token && !spotifyStatus?.linked && (
         <motion.section
           className="spotify-cta animate-fade-up"
@@ -233,29 +370,33 @@ const Dashboard = () => {
             <h3 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.2rem' }}>Get personalized picks</h3>
             <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>Connect Spotify to see events matched to your music taste</p>
           </div>
-          <a className="btn" href={`${authBase}/auth/spotify/login?token=${token}`}>Connect</a>
+          <a className="btn" href={`${authBase}/auth/spotify/login?token=${token}`}>Connect Spotify</a>
         </motion.section>
       )}
 
+      {/* ─── SPOTIFY PROFILE (linked) ─── */}
       {token && spotifyStatus?.linked && (
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.85rem 1.25rem', background: 'rgba(29, 185, 84, 0.08)', borderColor: 'rgba(29, 185, 84, 0.15)' }}>
-          <span style={{ color: '#1DB954', fontSize: '1.1rem' }}>&#10003;</span>
-          <span style={{ fontSize: '0.85rem', color: 'var(--ink-2)' }}>Spotify connected &middot; {spotifyStatus?.last_synced_at ? `Last synced ${new Date(spotifyStatus.last_synced_at).toLocaleDateString('en-IE')}` : 'Syncing...'}</span>
-          <button className="btn btn-sm btn-ghost" style={{ marginLeft: 'auto' }}
-            onClick={() => authAPI.syncSpotify().catch(() => {})}>Sync now</button>
-        </div>
+        <SpotifyProfileWidget profile={spotifyProfile} status={spotifyStatus} onSync={handleSyncSpotify} />
       )}
 
-      {/* ─── FOR YOU (Personalized) ─── */}
+      {/* ─── FOR YOU (Personalized with ML) ─── */}
       {token && personalizedEvents.length > 0 && (
         <section>
           <div className="section-header">
-            <h2 className="section-header-title">For you</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <h2 className="section-header-title">For you</h2>
+              {feedEvents.length > 0 && (
+                <span className="badge" style={{ fontSize: '0.6rem' }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
+                  AI Picks
+                </span>
+              )}
+            </div>
             <Link to="/discover" className="section-header-link">See all &rarr;</Link>
           </div>
           <div className="scroll-row">
             {personalizedEvents.slice(0, 12).map((event, i) => {
-              const img = event.images?.[0]?.url;
+              const img = getBestImage(event.images, 'card', 400);
               return (
                 <div key={event.id || i} className="card-event" style={{ width: 220, flexShrink: 0 }}>
                   <div className="card-event-img-wrap" style={{ paddingTop: '100%' }}>
@@ -268,9 +409,23 @@ const Dashboard = () => {
                         </svg>
                       </div>
                     )}
+                    {/* Match score indicator */}
+                    {event.rank_score > 0 && (
+                      <div style={{
+                        position: 'absolute', top: 8, right: 8, zIndex: 3,
+                        width: 32, height: 32, borderRadius: 8,
+                        background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: event.rank_score > 0.7 ? 'var(--emerald)' : event.rank_score > 0.4 ? 'var(--gold)' : 'var(--muted)',
+                        fontSize: '0.65rem', fontWeight: 800
+                      }}>
+                        {Math.round(event.rank_score * 100)}%
+                      </div>
+                    )}
                   </div>
                   <div className="card-event-body">
-                    <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.88rem', lineHeight: 1.3, marginBottom: '0.3rem' }}>{event.title}</h3>
+                    <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
+                    <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.88rem', lineHeight: 1.3, marginBottom: '0.3rem', marginTop: event.rank_reasons ? '0.3rem' : 0 }}>{event.title}</h3>
                     <div className="venue-strip">
                       <div className="venue-strip-dot" />
                       <span className="venue-strip-name">{event.venue_name || 'TBA'}</span>
@@ -315,6 +470,17 @@ const Dashboard = () => {
             <div className="stat-pill-label">Venues</div>
           </div>
         </div>
+        {feedEvents.length > 0 && (
+          <div className="stat-pill animate-fade-up">
+            <div className="stat-pill-icon" style={{ background: 'var(--violet-dim)', color: 'var(--violet)' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
+            </div>
+            <div>
+              <div className="stat-pill-value" style={{ color: 'var(--violet)' }}>{feedEvents.length}</div>
+              <div className="stat-pill-label">Matched for you</div>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* ─── BROWSE BY GENRE ─── */}
@@ -334,11 +500,20 @@ const Dashboard = () => {
             </button>
           ))}
         </div>
-        <div className="grid-events">
-          {filteredEvents.slice(0, 12).map((event, i) => (
-            <EventCard key={event.id || i} event={event} index={i} saved={savedIds.has(event.id)} onSave={handleSave} />
-          ))}
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeGenre}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="grid-events"
+          >
+            {filteredEvents.slice(0, 12).map((event, i) => (
+              <EventCard key={event.id || i} event={event} index={i} saved={savedIds.has(event.id)} onSave={handleSave} />
+            ))}
+          </motion.div>
+        </AnimatePresence>
         {filteredEvents.length === 0 && (
           <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
             <p style={{ color: 'var(--muted)', fontSize: '0.95rem' }}>No {activeGenre} events found. Try a different genre.</p>
@@ -354,7 +529,7 @@ const Dashboard = () => {
           </div>
           <div className="scroll-row">
             {upcoming.slice(0, 10).map((event, i) => {
-              const img = event.images?.[0]?.url;
+              const img = getBestImage(event.images, 'thumb', 200);
               return (
                 <div key={event.id || i} style={{ width: 300, flexShrink: 0 }} className="card" >
                   <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>

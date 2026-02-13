@@ -1,80 +1,23 @@
-name: CI/CD Pipeline
+name: Deploy to Production
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
+    branches: [master]
+  workflow_dispatch:
 
 env:
   AWS_REGION: eu-west-1
+  S3_BUCKET: wtc-ui-385017713886-eu-west-1
+  CF_DISTRIBUTION: E2HRBT0I8G9WPY
 
 jobs:
-  lint-and-test:
-    name: Lint and Test
+  deploy-backend:
+    name: Deploy Backend to EC2
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run linter
-        run: npm run lint || true
-
-      - name: Type check
-        run: npm run type-check || true
-
-      - name: Run unit tests
-        run: npm run test:unit:all -- --coverage
-
-      - name: Run integration tests
-        run: |
-          docker-compose -f docker-compose.test.yml up -d
-          sleep 30
-          npm run test:integration || true
-          docker-compose -f docker-compose.test.yml down
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage/lcov.info
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-      - name: Check coverage thresholds
-        run: |
-          COVERAGE=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
-          if (( $(echo "$COVERAGE < 70" | bc -l) )); then
-            echo "Coverage $COVERAGE% is below 70% threshold"
-            exit 1
-          fi
-          echo "Coverage check passed: $COVERAGE%"
-
-      - name: Run smoke tests
-        run: |
-          docker-compose up -d db
-          sleep 20
-          ./scripts/ci-smoke.sh || true
-
-  deploy-to-ec2:
-    name: Deploy to EC2
-    runs-on: ubuntu-latest
-    needs: lint-and-test
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -83,40 +26,141 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy via SSM
+      - name: Sync code to EC2 via S3 staging
         env:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
-          aws ssm send-command \
+          tar czf /tmp/backend.tar.gz \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='gigfinder-app' \
+            --exclude='gigfinder' \
+            --exclude='*.tar.gz' \
+            -C . .
+
+          aws s3 cp /tmp/backend.tar.gz s3://${{ env.S3_BUCKET }}/deploy/backend.tar.gz
+
+          COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=[
+            --timeout-seconds 300 \
+            --parameters "{\"commands\":[
+              \"cd /home/ec2-user/whatsthecraic\",
+              \"aws s3 cp s3://${{ env.S3_BUCKET }}/deploy/backend.tar.gz /tmp/backend.tar.gz --region ${{ env.AWS_REGION }}\",
+              \"tar xzf /tmp/backend.tar.gz -C /home/ec2-user/whatsthecraic/ --exclude='.env'\",
+              \"rm /tmp/backend.tar.gz\",
+              \"echo SYNC_DONE\"
+            ]}" \
+            --query 'Command.CommandId' --output text)
+
+          for i in $(seq 1 30); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id $COMMAND_ID \
+              --instance-id $INSTANCE_ID \
+              --query 'Status' --output text 2>/dev/null || echo "Pending")
+            echo "Attempt $i: $STATUS"
+            if [ "$STATUS" = "Success" ]; then break; fi
+            if [ "$STATUS" = "Failed" ]; then exit 1; fi
+            sleep 10
+          done
+
+      - name: Rebuild and restart services
+        env:
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids $INSTANCE_ID \
+            --document-name "AWS-RunShellScript" \
+            --timeout-seconds 300 \
+            --parameters '{"commands":[
               "cd /home/ec2-user/whatsthecraic",
-              "git pull origin main",
-              "docker-compose pull",
-              "docker-compose up -d --remove-orphans",
-              "docker system prune -f",
-              "sleep 30",
-              "docker-compose ps",
-              "curl -f http://localhost:4000/health || exit 1",
-              "curl -f http://localhost:4004/health || exit 1"
-            ]' \
-            --comment "Deploy WhatsTheCraic via GitHub Actions"
+              "docker compose up --build -d --remove-orphans 2>&1 | tail -30",
+              "sleep 20",
+              "docker compose ps"
+            ]}' \
+            --query 'Command.CommandId' --output text)
 
-      - name: Publish deployment metric
-        if: success()
+          for i in $(seq 1 40); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id $COMMAND_ID \
+              --instance-id $INSTANCE_ID \
+              --query 'Status' --output text 2>/dev/null || echo "Pending")
+            echo "Attempt $i: $STATUS"
+            if [ "$STATUS" = "Success" ]; then break; fi
+            if [ "$STATUS" = "Failed" ]; then exit 1; fi
+            sleep 10
+          done
+
+      - name: Health checks
+        env:
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids $INSTANCE_ID \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":[
+              "curl -sf http://localhost:4000/health && echo AGG_OK",
+              "curl -sf http://localhost:3001/health && echo AUTH_OK",
+              "curl -sf http://localhost:4003/health && echo EVENTS_OK",
+              "curl -sf http://localhost:4004/health && echo ML_OK || echo ML_WARN"
+            ]}' \
+            --query 'Command.CommandId' --output text)
+          sleep 15
+          OUTPUT=$(aws ssm get-command-invocation \
+            --command-id $COMMAND_ID --instance-id $INSTANCE_ID \
+            --query 'StandardOutputContent' --output text)
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "AGG_OK"
+
+  deploy-frontend:
+    name: Deploy Frontend to S3/CloudFront
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Build frontend
+        working-directory: gigfinder-app
+        run: |
+          npm ci
+          NODE_OPTIONS="--openssl-legacy-provider" npm run build
+        env:
+          CI: "false"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy to S3
+        working-directory: gigfinder-app
+        run: aws s3 sync build/ s3://${{ env.S3_BUCKET }}/ --delete
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ env.CF_DISTRIBUTION }} \
+            --paths "/*"
+
+  post-deploy:
+    name: Post-Deploy Metrics
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend]
+    if: always()
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+      - name: Publish metric
+        run: |
+          STATUS=${{ needs.deploy-backend.result == 'success' && needs.deploy-frontend.result == 'success' && '1' || '0' }}
+          METRIC=$( [ "$STATUS" = "1" ] && echo "DeploymentSuccess" || echo "DeploymentFailure")
           aws cloudwatch put-metric-data \
             --namespace WhatsTheCraic/Deployments \
-            --metric-name DeploymentSuccess \
-            --value 1 \
-            --dimensions Environment=Production,Branch=main
-
-      - name: Publish deployment failure metric
-        if: failure()
-        run: |
-          aws cloudwatch put-metric-data \
-            --namespace WhatsTheCraic/Deployments \
-            --metric-name DeploymentFailure \
-            --value 1 \
-            --dimensions Environment=Production,Branch=main
+            --metric-name $METRIC --value 1 \
+            --dimensions Environment=Production

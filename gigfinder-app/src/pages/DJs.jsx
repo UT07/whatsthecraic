@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import djAPI from '../services/djAPI';
 import eventsAPI from '../services/eventsAPI';
+import { getUser } from '../services/apiClient';
 import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 
 const DJs = () => {
+  const user = getUser();
+  const isAdmin = user?.role === 'admin';
+  const isOrganizerOrAdmin = user?.role === 'organizer' || user?.role === 'admin';
   const [djs, setDjs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -54,7 +58,7 @@ const DJs = () => {
       const data = await eventsAPI.getPerformers({
         city: filters.city || undefined,
         q: filters.q || undefined,
-        include: 'ticketmaster,spotify',
+        include: 'ticketmaster,spotify,mixcloud',
         limit: 200
       });
       setPerformers(data.performers || []);
@@ -122,7 +126,9 @@ const DJs = () => {
             </svg>
             {performersLoading ? 'Loading...' : 'Discover artists'}
           </button>
-          <button onClick={() => openModal()} className="btn btn-primary btn-sm">Add artist</button>
+          {isAdmin && (
+            <button onClick={() => openModal()} className="btn btn-primary btn-sm">Add artist</button>
+          )}
         </div>
       </div>
 
@@ -218,12 +224,14 @@ const DJs = () => {
                         <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>SC</span>
                       )}
                     </div>
-                    <div style={{ display: 'flex', gap: '0.35rem' }}>
-                      <button onClick={() => openModal(dj)} className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: '0.75rem' }}>Edit</button>
-                      <button onClick={() => handleDeleteDJ(dj.dj_id)} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6V20a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2V6"/></svg>
-                      </button>
-                    </div>
+                    {isAdmin && (
+                      <div style={{ display: 'flex', gap: '0.35rem' }}>
+                        <button onClick={() => openModal(dj)} className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: '0.75rem' }}>Edit</button>
+                        <button onClick={() => handleDeleteDJ(dj.dj_id)} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6V20a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2V6"/></svg>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               ))}
@@ -275,8 +283,11 @@ const DJs = () => {
                       </div>
                     )}
                     <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
-                      <span className={`badge ${performer.source === 'spotify' ? '' : 'badge-sky'}`}
-                        style={{ fontSize: '0.6rem', ...(performer.source === 'spotify' ? { background: 'rgba(29,185,84,0.2)', color: '#1DB954' } : {}) }}>
+                      <span className={`badge ${performer.source === 'spotify' ? '' : performer.source === 'mixcloud' ? '' : 'badge-sky'}`}
+                        style={{ fontSize: '0.6rem',
+                          ...(performer.source === 'spotify' ? { background: 'rgba(29,185,84,0.2)', color: '#1DB954' } : {}),
+                          ...(performer.source === 'mixcloud' ? { background: 'rgba(82,177,252,0.2)', color: '#52B1FC' } : {})
+                        }}>
                         {performer.source}
                       </span>
                     </div>
@@ -289,6 +300,12 @@ const DJs = () => {
                       <p className="line-clamp-1" style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
                         {Array.isArray(performer.genres) ? performer.genres.join(', ') : performer.genres}
                       </p>
+                    )}
+                    {(performer.spotifyUrl || performer.mixcloudUrl) && (
+                      <a href={performer.spotifyUrl || performer.mixcloudUrl} target="_blank" rel="noopener noreferrer"
+                        style={{ fontSize: '0.7rem', color: performer.spotifyUrl ? '#1DB954' : '#52B1FC', marginTop: '0.25rem', display: 'inline-block' }}>
+                        View on {performer.spotifyUrl ? 'Spotify' : 'Mixcloud'} ↗
+                      </a>
                     )}
                   </div>
                 </motion.div>

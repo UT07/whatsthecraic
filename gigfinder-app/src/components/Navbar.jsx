@@ -17,6 +17,7 @@ const Navbar = ({ setIsAuthenticated }) => {
   const isAuthenticated = Boolean(getToken());
   const user = getUser();
   const isOrganizer = user?.role === 'organizer' || user?.role === 'admin';
+  const isAdmin = user?.role === 'admin';
 
   const isActive = (path) => location.pathname === path;
 
@@ -74,6 +75,16 @@ const Navbar = ({ setIsAuthenticated }) => {
                   <span style={{ fontSize: '0.82rem', fontWeight: 500, color: 'var(--ink-2)' }}>
                     {user?.name || 'Member'}
                   </span>
+                  {(isAdmin || isOrganizer) && (
+                    <span style={{
+                      fontSize: '0.58rem', fontWeight: 700, padding: '0.1rem 0.35rem',
+                      borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.04em',
+                      background: isAdmin ? 'rgba(255,92,92,0.15)' : 'rgba(0,214,125,0.15)',
+                      color: isAdmin ? '#ff5c5c' : 'var(--emerald)'
+                    }}>
+                      {user?.role}
+                    </span>
+                  )}
                 </div>
                 <button onClick={handleLogout} className="btn btn-ghost btn-sm">
                   Sign out

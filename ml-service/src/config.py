@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Model configuration
     model_dir: str = "/app/models"
     model_version: str = "v1.0.0"
-    min_training_samples: int = 100
+    min_training_samples: int = int(os.getenv("MIN_TRAINING_SAMPLES", "10"))
     retrain_threshold_days: int = 7
 
     # AWS DynamoDB for A/B testing (on-demand pricing)

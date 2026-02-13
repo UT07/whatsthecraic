@@ -71,10 +71,8 @@ coverage/lcov-report/
 dist-ssr/
 *.local
 
-# Docker related
-Dockerfile
-docker-compose.yml
-docker-compose.*.yml
+# Deployment artifacts
+*.tar.gz
 
 # AWS configuration files
 .aws/

@@ -15,6 +15,8 @@ const {
   upsertSourceEvent
 } = require('./ingestion');
 const rateLimit = require('express-rate-limit');
+const spotifyClient = require('./spotify-client');
+const mixcloudClient = require('./mixcloud-client');
 
 // Adjust these env vars / defaults as needed
 const DB_HOST = process.env.DB_HOST || 'db';
@@ -50,6 +52,9 @@ const BANDSINTOWN_SEED_ARTISTS = process.env.BANDSINTOWN_SEED_ARTISTS
 const BANDSINTOWN_ALLOW_ANY_ARTIST = (process.env.BANDSINTOWN_ALLOW_ANY_ARTIST || 'false') === 'true';
 const BANDSINTOWN_USER_SYNC_HOURS = Number.parseInt(process.env.BANDSINTOWN_USER_SYNC_HOURS || '12', 10);
 const BANDSINTOWN_USER_MAX_ARTISTS = Number.parseInt(process.env.BANDSINTOWN_USER_MAX_ARTISTS || '10', 10);
+const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || null;
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || null;
+const MIXCLOUD_ENABLED = (process.env.MIXCLOUD_ENABLED || 'true') === 'true';
 
 const warnOnMissingEnv = () => {
   const missing = [];
@@ -697,6 +702,7 @@ app.delete('/events/:id', async (req, res) => {
 
 const parseJson = (value, fallback = []) => {
   if (!value) return fallback;
+  if (typeof value === 'object' && value !== null) return value;
   try {
     return JSON.parse(value);
   } catch {
@@ -907,6 +913,55 @@ const getUserSignals = async (userId) => {
   };
 };
 
+// Genre family mapping: maps broad Ticketmaster genres ↔ specific Spotify sub-genres
+const GENRE_FAMILIES = {
+  dance: ['techno', 'house', 'hard techno', 'melodic techno', 'melodic house', 'tech house',
+    'afro house', 'progressive house', 'hard house', 'acid techno', 'bounce', 'tekno',
+    'trance', 'deep house', 'minimal techno', 'edm', 'electronic', 'electronica',
+    'drum and bass', 'dnb', 'dubstep', 'garage', 'uk garage', 'bass'],
+  rock: ['alternative rock', 'indie rock', 'hard rock', 'punk rock', 'punk', 'grunge',
+    'post-punk', 'shoegaze', 'emo', 'psychedelic rock', 'classic rock', 'math rock'],
+  pop: ['synth-pop', 'electropop', 'indie pop', 'dream pop', 'k-pop', 'j-pop',
+    'art pop', 'chamber pop', 'power pop', 'pop rock'],
+  'hip-hop/rap': ['hip hop', 'hip-hop', 'rap', 'trap', 'drill', 'grime',
+    'boom bap', 'conscious hip hop', 'mumble rap', 'uk drill', 'lo-fi hip hop'],
+  metal: ['heavy metal', 'death metal', 'black metal', 'thrash metal', 'doom metal',
+    'metalcore', 'deathcore', 'nu-metal', 'progressive metal', 'power metal'],
+  jazz: ['acid jazz', 'smooth jazz', 'jazz fusion', 'nu jazz', 'bebop', 'swing'],
+  folk: ['indie folk', 'folk rock', 'celtic', 'irish folk', 'traditional irish',
+    'acoustic', 'singer-songwriter', 'americana'],
+  'r&b': ['rnb', 'neo-soul', 'soul', 'contemporary r&b', 'funk', 'motown'],
+  country: ['country rock', 'alt-country', 'americana', 'bluegrass', 'country pop'],
+  classical: ['orchestral', 'chamber music', 'opera', 'contemporary classical']
+};
+
+// Build reverse lookup: sub-genre → [parent genres]
+const GENRE_REVERSE = {};
+for (const [parent, children] of Object.entries(GENRE_FAMILIES)) {
+  GENRE_REVERSE[parent] = [parent];
+  for (const child of children) {
+    if (!GENRE_REVERSE[child]) GENRE_REVERSE[child] = [];
+    GENRE_REVERSE[child].push(parent);
+    if (!GENRE_REVERSE[parent].includes(child)) GENRE_REVERSE[parent].push(...children);
+  }
+}
+
+// Expand a genre list to include related genres from the family map
+const expandGenres = (genreList) => {
+  const expanded = new Set(genreList);
+  for (const g of genreList) {
+    // If g is a parent genre, add all children
+    if (GENRE_FAMILIES[g]) {
+      GENRE_FAMILIES[g].forEach(child => expanded.add(child));
+    }
+    // If g is a child, add the parent
+    if (GENRE_REVERSE[g]) {
+      GENRE_REVERSE[g].forEach(parent => expanded.add(parent));
+    }
+  }
+  return Array.from(expanded);
+};
+
 const scoreEventRow = (row, signals) => {
   const reasons = [];
   let score = 0;
@@ -917,18 +972,22 @@ const scoreEventRow = (row, signals) => {
   const savedTitles = signals.savedTitles || [];
 
   const genres = parseJson(row.genres).map(normalizeToken).filter(Boolean);
+  // Expand event genres to include related sub-genres
+  const expandedEventGenres = expandGenres(genres);
   const title = normalizeToken(row.title);
   const description = normalizeToken(row.description);
 
-  const genreMatches = genres.filter(g => signals.preferredGenres.includes(g));
+  // Direct genre match = +3 per match
+  const genreMatches = expandedEventGenres.filter(g => signals.preferredGenres.includes(g));
   if (genreMatches.length > 0) {
-    score += genreMatches.length * 3;
+    score += Math.min(genreMatches.length, 3) * 3;
     reasons.push({ type: 'preferred_genre', values: genreMatches.slice(0, 3) });
   }
 
-  const spotifyGenreMatches = genres.filter(g => signals.spotifyGenres.includes(g));
+  // Spotify genre match via expanded genres = +2 per match
+  const spotifyGenreMatches = expandedEventGenres.filter(g => signals.spotifyGenres.includes(g));
   if (spotifyGenreMatches.length > 0) {
-    score += spotifyGenreMatches.length * 2;
+    score += Math.min(spotifyGenreMatches.length, 5) * 2;
     reasons.push({ type: 'spotify_genre', values: spotifyGenreMatches.slice(0, 3) });
   }
 
@@ -1181,8 +1240,8 @@ app.get('/v1/events/search', async (req, res) => {
     params.push(userId);
   }
 
-  const parsedLimit = Number.parseInt(limit || '50', 10);
-  const limitValue = Number.isNaN(parsedLimit) ? 50 : Math.min(parsedLimit, 200);
+  const parsedLimit = Number.parseInt(limit || '200', 10);
+  const limitValue = Number.isNaN(parsedLimit) ? 200 : Math.min(parsedLimit, 500);
   const parsedOffset = Number.parseInt(offset || '0', 10);
   const offsetValue = Number.isNaN(parsedOffset) ? 0 : Math.max(parsedOffset, 0);
 
@@ -1274,7 +1333,7 @@ app.get('/v1/performers', async (req, res) => {
   } = parsed.data;
 
   const includeSet = new Set(
-    (include ? include.split(',') : ['local', 'ticketmaster', 'spotify'])
+    (include ? include.split(',') : ['local', 'ticketmaster', 'spotify', 'mixcloud'])
       .map(item => normalizeToken(item))
       .filter(Boolean)
   );
@@ -1345,32 +1404,84 @@ app.get('/v1/performers', async (req, res) => {
     });
   }
 
-  if (includeSet.has('spotify')) {
-    const authHeader = req.headers.authorization || '';
-    if (authHeader.startsWith('Bearer ')) {
-      try {
-        const payload = jwt.verify(authHeader.slice(7), JWT_SECRET);
-        const userId = payload?.user_id;
-        if (userId) {
-          const [rows] = await pool.query(
-            'SELECT top_artists FROM user_spotify WHERE user_id = ?',
-            [userId]
-          );
-          const artists = rows.length ? parseJson(rows[0].top_artists, []) : [];
-          artists.forEach(item => {
-            const name = typeof item === 'string' ? item : (item?.name || '');
-            if (!name) return;
-            performers.push({
-              name,
-              source: 'spotify',
-              spotify_id: typeof item === 'object' ? item?.id || null : null,
-              genres: typeof item === 'object' ? item?.genres || null : null
-            });
-          });
-        }
-      } catch {
-        // Ignore invalid token for this optional path
+  if (includeSet.has('bandsintown')) {
+    const params = [
+      fromDate.toISOString().slice(0, 19).replace('T', ' '),
+      toDate.toISOString().slice(0, 19).replace('T', ' ')
+    ];
+    let whereSql = 'WHERE se.source = ? AND e.start_time >= ? AND e.start_time <= ?';
+    params.unshift('bandsintown');
+    if (city) {
+      whereSql += ' AND LOWER(e.city) = LOWER(?)';
+      params.push(city);
+    }
+    const [rows] = await pool.query(
+      `SELECT DISTINCT e.title, se.raw_payload
+       FROM source_events se
+       JOIN events e ON e.id = se.event_id
+       ${whereSql}
+       LIMIT ?`,
+      [...params, limitValue]
+    );
+    rows.forEach(row => {
+      const payload = parseJson(row.raw_payload, null);
+      const artistName = payload?.artist?.name || payload?.lineup?.[0] || null;
+      const imageUrl = payload?.artist?.image_url || null;
+      if (artistName) {
+        performers.push({
+          name: artistName,
+          source: 'bandsintown',
+          image: imageUrl,
+          genres: null
+        });
       }
+    });
+  }
+
+  if (includeSet.has('spotify') && SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET) {
+    try {
+      const searchQuery = keyword || 'irish artist';
+      const artists = await spotifyClient.searchArtists(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, searchQuery, 30);
+      artists.forEach(a => {
+        performers.push({
+          name: a.name,
+          source: 'spotify',
+          image: a.image,
+          genres: a.genres.length ? a.genres.join(', ') : null,
+          popularity: a.popularity,
+          followers: a.followers,
+          spotifyUrl: a.spotifyUrl,
+          spotifyId: a.spotifyId
+        });
+      });
+    } catch (err) {
+      console.warn('[performers] Spotify search failed:', err.message);
+    }
+  }
+
+  if (includeSet.has('mixcloud') && MIXCLOUD_ENABLED) {
+    try {
+      const searchQuery = keyword || 'dublin dj';
+      const djs = await mixcloudClient.searchDJs(searchQuery, 20);
+      for (const dj of djs) {
+        let genres = null;
+        try {
+          const casts = await mixcloudClient.getDJCloudcasts(dj.username, 5);
+          const allTags = casts.flatMap(c => c.tags);
+          const unique = [...new Set(allTags)].slice(0, 5);
+          if (unique.length) genres = unique.join(', ');
+        } catch { /* skip genre extraction on error */ }
+        performers.push({
+          name: dj.name,
+          source: 'mixcloud',
+          image: dj.image,
+          genres,
+          mixcloudUrl: dj.url,
+          username: dj.username
+        });
+      }
+    } catch (err) {
+      console.warn('[performers] Mixcloud search failed:', err.message);
     }
   }
 
@@ -1434,8 +1545,8 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
   where.push('events.id NOT IN (SELECT event_id FROM user_hidden_events WHERE user_id = ?)');
   params.push(userId);
 
-  const parsedLimit = Number.parseInt(limit || '50', 10);
-  const limitValue = Number.isNaN(parsedLimit) ? 50 : Math.min(parsedLimit, 200);
+  const parsedLimit = Number.parseInt(limit || '200', 10);
+  const limitValue = Number.isNaN(parsedLimit) ? 200 : Math.min(parsedLimit, 500);
   const parsedOffset = Number.parseInt(offset || '0', 10);
   const offsetValue = Number.isNaN(parsedOffset) ? 0 : Math.max(parsedOffset, 0);
 

@@ -72,9 +72,11 @@ if (process.env.NODE_ENV !== 'test') {
 
 const PORT = process.env.PORT || process.env.AGGREGATOR_PORT || 4000;
 const TICKETMASTER_API_KEY = process.env.TICKETMASTER_API_KEY;
+const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://auth-service:3001';
 const VENUE_SERVICE_URL = process.env.VENUE_SERVICE_URL || 'http://venue-service:4001';
 const DJ_SERVICE_URL = process.env.DJ_SERVICE_URL || 'http://dj-service:4002';
 const LOCAL_EVENTS_URL = process.env.LOCAL_EVENTS_URL || 'http://events-service:4003';
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://ml-service:4004';
 
 const warnOnMissingEnv = () => {
   const warnings = [];
@@ -161,6 +163,21 @@ app.get('/metrics', (req, res) => {
     avg_duration_ms: avgDuration
   });
 });
+
+// ─── Auth service proxy ───
+app.post('/v1/auth/signup', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/signup`, method: 'post' }));
+app.post('/v1/auth/login', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/login`, method: 'post' }));
+app.get('/v1/auth/spotify/login', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/spotify/login` }));
+app.get('/v1/auth/spotify/callback', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/spotify/callback` }));
+app.get('/v1/auth/spotify/status', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/spotify/status` }));
+app.post('/v1/auth/spotify/sync', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/spotify/sync`, method: 'post' }));
+app.get('/v1/auth/spotify/profile', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/spotify/profile` }));
+app.get('/v1/auth/preferences', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/preferences` }));
+app.post('/v1/auth/preferences', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/preferences`, method: 'post' }));
+
+// ─── ML service proxy ───
+app.get('/v1/ml/health', (req, res) => proxyRequest(req, res, { url: `${ML_SERVICE_URL}/health` }));
+app.get('/v1/ml/recommendations/:userId', (req, res) => proxyRequest(req, res, { url: `${ML_SERVICE_URL}/recommendations/${req.params.userId}` }));
 
 app.get('/v1/events/search', async (req, res) => {
   try {

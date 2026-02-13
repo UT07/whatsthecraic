@@ -90,16 +90,16 @@ class RecommendationEngine:
                 se.event_id,
                 1.0 as interaction_score,
                 'save' as interaction_type,
-                se.created_at
-            FROM saved_events se
+                se.saved_at as created_at
+            FROM user_saved_events se
             UNION ALL
             SELECT
                 he.user_id,
                 he.event_id,
                 -0.5 as interaction_score,
                 'hide' as interaction_type,
-                he.created_at
-            FROM hidden_events he
+                he.hidden_at as created_at
+            FROM user_hidden_events he
             """
 
             interactions_df = pd.read_sql(query, conn)
@@ -110,13 +110,13 @@ class RecommendationEngine:
                 id as event_id,
                 title,
                 city,
-                date,
-                price,
-                genre,
+                start_time as date,
+                price_min as price,
+                genres as genre,
                 venue_name,
-                artist_name
+                title as artist_name
             FROM events
-            WHERE date >= CURDATE()
+            WHERE start_time >= NOW()
             """
 
             events_df = pd.read_sql(events_query, conn)
@@ -368,23 +368,20 @@ class RecommendationEngine:
         conn = self.get_db_connection()
         try:
             query = """
-            SELECT e.id, e.title, e.artist_name, e.genre, e.city, e.date, e.price, e.venue_name,
-                   CASE
-                       WHEN e.genre IN (SELECT preferred_genres FROM user_preferences WHERE user_id = %s) THEN 1.0
-                       WHEN e.artist_name IN (SELECT preferred_artists FROM user_preferences WHERE user_id = %s) THEN 0.8
-                       ELSE 0.5
-                   END as score
+            SELECT e.id, e.title, e.title as artist_name, e.genres as genre, e.city,
+                   e.start_time as date, e.price_min as price, e.venue_name,
+                   0.5 as score
             FROM events e
-            WHERE e.date >= CURDATE()
+            WHERE e.start_time >= NOW()
             """
 
-            params = [user_id, user_id]
+            params = []
 
             if city:
-                query += " AND e.city = %s"
+                query += " AND LOWER(e.city) = LOWER(%s)"
                 params.append(city)
 
-            query += " ORDER BY score DESC, e.date ASC LIMIT %s"
+            query += " ORDER BY e.start_time ASC LIMIT %s"
             params.append(limit)
 
             cursor = conn.cursor()
@@ -442,19 +439,20 @@ class RecommendationEngine:
         conn = self.get_db_connection()
         try:
             query = """
-            SELECT e.id, e.title, e.artist_name, e.genre, e.city, e.date, e.price, e.venue_name,
+            SELECT e.id, e.title, e.title as artist_name, e.genres as genre, e.city,
+                   e.start_time as date, e.price_min as price, e.venue_name,
                    COUNT(se.event_id) as save_count
             FROM events e
-            LEFT JOIN saved_events se ON e.id = se.event_id
-            WHERE e.date >= CURDATE()
+            LEFT JOIN user_saved_events se ON e.id = se.event_id
+            WHERE e.start_time >= NOW()
             """
 
             params = []
             if city:
-                query += " AND e.city = %s"
+                query += " AND LOWER(e.city) = LOWER(%s)"
                 params.append(city)
 
-            query += " GROUP BY e.id ORDER BY save_count DESC, e.date ASC LIMIT %s"
+            query += " GROUP BY e.id ORDER BY save_count DESC, e.start_time ASC LIMIT %s"
             params.append(limit)
 
             cursor = conn.cursor()
@@ -489,10 +487,11 @@ class RecommendationEngine:
         try:
             placeholders = ','.join(['%s'] * len(event_ids))
             query = f"""
-            SELECT id, title, artist_name, genre, city, date, price, venue_name
+            SELECT id, title, title as artist_name, genres as genre, city,
+                   start_time as date, price_min as price, venue_name
             FROM events
             WHERE id IN ({placeholders})
-            AND date >= CURDATE()
+            AND start_time >= NOW()
             """
 
             params = event_ids

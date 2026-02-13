@@ -126,7 +126,7 @@ class ABTestManager:
                 {'variant_id': 'control', 'weight': 0.25, 'description': 'Popularity-based'},
                 {'variant_id': 'collaborative_filtering', 'weight': 0.25, 'description': 'Collaborative Filtering'},
                 {'variant_id': 'content_based', 'weight': 0.25, 'description': 'Content-Based'},
-                {'variant_id': 'hybrid', 'weight': 0.25', 'description': 'Hybrid Model'}
+                {'variant_id': 'hybrid', 'weight': 0.25, 'description': 'Hybrid Model'}
             ],
             'created_at': datetime.utcnow().isoformat()
         }
