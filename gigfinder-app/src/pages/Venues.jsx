@@ -1,353 +1,557 @@
 // src/pages/Venues.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import venueAPI from '../services/venueAPI';
-import { motion } from 'framer-motion';
-import { useForm } from 'react-hook-form';
+import eventsAPI from '../services/eventsAPI';
+import { getUser } from '../services/apiClient';
 
+/* ── helpers ─────────────────────────────────────────────────────── */
+const fmt = (d) => {
+  if (!d) return '';
+  const dt = new Date(d);
+  return dt.toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' });
+};
+const fmtTime = (d) => {
+  if (!d) return '';
+  return new Date(d).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
+};
+
+const VENUE_COLORS = [
+  'linear-gradient(135deg, #1a3a2a 0%, #0d1f17 100%)',
+  'linear-gradient(135deg, #2a1a3a 0%, #170d1f 100%)',
+  'linear-gradient(135deg, #1a2a3a 0%, #0d171f 100%)',
+  'linear-gradient(135deg, #3a2a1a 0%, #1f170d 100%)',
+  'linear-gradient(135deg, #1a3a3a 0%, #0d1f1f 100%)',
+  'linear-gradient(135deg, #3a1a2a 0%, #1f0d17 100%)',
+];
+
+const GENRE_ICONS = {
+  electronic: '⚡', techno: '🔊', house: '🏠', 'hip-hop': '🎤',
+  rock: '🎸', jazz: '🎷', trad: '🍀', folk: '🪕', pop: '🎵',
+  indie: '🎹', metal: '🤘', classical: '🎻', default: '🎶'
+};
+
+const getGenreIcon = (genre) => {
+  if (!genre) return GENRE_ICONS.default;
+  const key = genre.toLowerCase();
+  return GENRE_ICONS[key] || GENRE_ICONS.default;
+};
+
+/* ── Skeleton ────────────────────────────────────────────────────── */
+const VenueSkeleton = () => (
+  <div className="card-venue" style={{ minHeight: 280 }}>
+    <div className="skeleton" style={{ height: 160, borderRadius: '12px 12px 0 0' }} />
+    <div style={{ padding: '1rem' }}>
+      <div className="skeleton" style={{ height: 18, width: '70%', marginBottom: 8 }} />
+      <div className="skeleton" style={{ height: 14, width: '50%' }} />
+    </div>
+  </div>
+);
+
+/* ── Event mini card (shown inside venue detail) ─────────────────── */
+const VenueEventCard = ({ event, onSave }) => {
+  const img = event.image_url || event.imageUrl;
+  return (
+    <div style={{
+      display: 'flex', gap: '0.75rem', padding: '0.75rem',
+      background: 'rgba(255,255,255,0.03)', borderRadius: 12,
+      border: '1px solid var(--line)', transition: 'background 0.2s'
+    }}
+      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+    >
+      {/* Thumbnail */}
+      <div style={{
+        width: 72, height: 72, borderRadius: 10, flexShrink: 0, overflow: 'hidden',
+        background: img ? 'transparent' : 'linear-gradient(135deg, var(--emerald-dim) 0%, rgba(0,214,125,0.05) 100%)'
+      }}>
+        {img ? (
+          <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <div style={{
+            width: '100%', height: '100%', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', fontSize: '1.5rem'
+          }}>
+            {getGenreIcon(event.genre)}
+          </div>
+        )}
+      </div>
+
+      {/* Details */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: '0.78rem', color: 'var(--emerald)', fontWeight: 600, marginBottom: 2 }}>
+          {fmt(event.date || event.start_date)} · {fmtTime(event.date || event.start_date)}
+        </div>
+        <div style={{
+          fontSize: '0.92rem', fontWeight: 600, color: 'var(--ink)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+        }}>
+          {event.name || event.title}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 4, flexWrap: 'wrap' }}>
+          {event.genre && (
+            <span className="chip" style={{ fontSize: '0.68rem' }}>{event.genre}</span>
+          )}
+          {(event.source) && (
+            <span style={{ fontSize: '0.65rem', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              via {event.source}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignItems: 'center', justifyContent: 'center' }}>
+        {event.ticket_url && (
+          <a href={event.ticket_url} target="_blank" rel="noreferrer"
+            style={{
+              padding: '0.3rem 0.6rem', borderRadius: 8, fontSize: '0.7rem', fontWeight: 600,
+              background: 'var(--emerald)', color: '#000', textDecoration: 'none'
+            }}>
+            Tickets
+          </a>
+        )}
+        <button onClick={() => onSave(event)}
+          style={{
+            background: 'none', border: '1px solid var(--line)', borderRadius: 8,
+            padding: '0.3rem 0.5rem', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--ink-2)'
+          }}>
+          ♡
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ── Main Venues Page ────────────────────────────────────────────── */
 const Venues = () => {
   const [venues, setVenues] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingVenue, setEditingVenue] = useState(null);
-  const [filters, setFilters] = useState({
-    q: '',
-    city: '',
-    genreFocus: '',
-    capacityMin: '',
-    capacityMax: ''
-  });
-  const [availabilityOpen, setAvailabilityOpen] = useState(false);
-  const [availabilityVenue, setAvailabilityVenue] = useState(null);
-  const [availabilityItems, setAvailabilityItems] = useState([]);
-  const [availabilityLoading, setAvailabilityLoading] = useState(false);
-  const [availabilityForm, setAvailabilityForm] = useState({
-    start_time: '',
-    end_time: '',
-    status: 'available',
-    notes: ''
-  });
+  const [search, setSearch] = useState('');
+  const [cityFilter, setCityFilter] = useState('');
+  const [genreFilter, setGenreFilter] = useState('');
 
-  const { register, handleSubmit, reset } = useForm();
+  // Venue detail / events panel
+  const [selectedVenue, setSelectedVenue] = useState(null);
+  const [venueEvents, setVenueEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
 
-  const fetchVenues = (useSearch = false) => {
-    const request = useSearch ? venueAPI.searchVenues(filters) : venueAPI.getAllVenues();
-    request
-      .then((data) => {
-        setVenues(useSearch ? (data.venues || []) : data);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("Error fetching venues:", error);
-        setLoading(false);
-      });
-  };
+  const user = getUser();
+  const isOrganizer = user?.role === 'organizer' || user?.role === 'admin';
 
-  useEffect(() => {
-    fetchVenues();
-  }, []);
-
-  const runSearch = async () => {
-    setSearching(true);
+  /* ── fetch venues ──────────────────────────────────────────────── */
+  const fetchVenues = useCallback(async () => {
     setLoading(true);
-    await fetchVenues(true);
-    setSearching(false);
-  };
-
-  const resetSearch = async () => {
-    setFilters({ q: '', city: '', genreFocus: '', capacityMin: '', capacityMax: '' });
-    setLoading(true);
-    await fetchVenues(false);
-  };
-
-  const openModal = (venue = null) => {
-    setEditingVenue(venue);
-    reset(venue || {});
-    setModalOpen(true);
-  };
-
-  const openAvailability = async (venue) => {
-    setAvailabilityVenue(venue);
-    setAvailabilityOpen(true);
-    setAvailabilityLoading(true);
     try {
-      const data = await venueAPI.getAvailability(venue.id);
-      setAvailabilityItems(data.availability || []);
-    } catch (error) {
-      console.error('Error loading availability:', error);
-      setAvailabilityItems([]);
+      const hasFilters = search || cityFilter || genreFilter;
+      let data;
+      if (hasFilters) {
+        const filters = {};
+        if (search) filters.q = search;
+        if (cityFilter) filters.city = cityFilter;
+        if (genreFilter) filters.genreFocus = genreFilter;
+        data = await venueAPI.searchVenues(filters);
+        setVenues(data.venues || []);
+      } else {
+        data = await venueAPI.getAllVenues();
+        setVenues(Array.isArray(data) ? data : (data.venues || []));
+      }
+    } catch (err) {
+      console.error('Error fetching venues:', err);
     } finally {
-      setAvailabilityLoading(false);
+      setLoading(false);
     }
-  };
+  }, [search, cityFilter, genreFilter]);
 
-  const closeAvailability = () => {
-    setAvailabilityOpen(false);
-    setAvailabilityVenue(null);
-    setAvailabilityItems([]);
-    setAvailabilityForm({ start_time: '', end_time: '', status: 'available', notes: '' });
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchVenues(); }, []);
 
-  const addAvailability = async () => {
-    if (!availabilityVenue) return;
+  /* ── fetch events for a venue ──────────────────────────────────── */
+  const openVenueEvents = async (venue) => {
+    setSelectedVenue(venue);
+    setEventsLoading(true);
+    setVenueEvents([]);
     try {
-      const payload = {
-        start_time: availabilityForm.start_time,
-        end_time: availabilityForm.end_time,
-        status: availabilityForm.status,
-        notes: availabilityForm.notes
-      };
-      const response = await venueAPI.addAvailability(availabilityVenue.id, payload);
-      setAvailabilityItems(prev => [...prev, response.availability]);
-      setAvailabilityForm({ start_time: '', end_time: '', status: 'available', notes: '' });
-    } catch (error) {
-      console.error('Error adding availability:', error);
-      alert('Failed to add availability');
+      const data = await eventsAPI.searchEvents({ venue: venue.name, limit: 30 });
+      setVenueEvents(data.events || []);
+    } catch (err) {
+      console.error('Error fetching venue events:', err);
+    } finally {
+      setEventsLoading(false);
     }
   };
 
-  const deleteAvailability = async (availabilityId) => {
-    if (!availabilityVenue) return;
+  const closeVenuePanel = () => {
+    setSelectedVenue(null);
+    setVenueEvents([]);
+  };
+
+  const handleSaveEvent = async (event) => {
     try {
-      await venueAPI.deleteAvailability(availabilityVenue.id, availabilityId);
-      setAvailabilityItems(prev => prev.filter(item => item.id !== availabilityId));
-    } catch (error) {
-      console.error('Error deleting availability:', error);
-      alert('Failed to delete availability');
+      await eventsAPI.saveEvent(event.id);
+    } catch (err) {
+      console.error('Error saving event:', err);
     }
   };
 
-  const closeModal = () => {
-    setEditingVenue(null);
-    setModalOpen(false);
-  };
+  /* ── derived ───────────────────────────────────────────────────── */
+  const cities = [...new Set(venues.map(v => v.city || v.address?.split(',').pop()?.trim()).filter(Boolean))];
+  const genres = [...new Set(venues.map(v => v.genreFocus).filter(Boolean))];
 
-  const onSubmit = (formData) => {
-    if (editingVenue) {
-      venueAPI.updateVenue(editingVenue.id, formData)
-        .then(() => {
-          alert("Venue updated successfully");
-          fetchVenues();
-          closeModal();
-        })
-        .catch(error => {
-          console.error("Error updating venue:", error);
-          alert("Failed to update venue");
-        });
-    } else {
-      venueAPI.addVenue(formData)
-        .then(() => {
-          alert("Venue added successfully");
-          fetchVenues();
-          closeModal();
-        })
-        .catch(error => {
-          console.error("Error adding venue:", error);
-          alert("Failed to add venue");
-        });
-    }
-  };
+  const filteredVenues = venues.filter(v => {
+    const matchSearch = !search || v.name?.toLowerCase().includes(search.toLowerCase()) ||
+      v.address?.toLowerCase().includes(search.toLowerCase());
+    const matchCity = !cityFilter || (v.city || v.address || '').toLowerCase().includes(cityFilter.toLowerCase());
+    const matchGenre = !genreFilter || (v.genreFocus || '').toLowerCase().includes(genreFilter.toLowerCase());
+    return matchSearch && matchCity && matchGenre;
+  });
 
-  const handleDeleteVenue = (venueId) => {
-    if (window.confirm("Are you sure you want to delete this venue?")) {
-      venueAPI.deleteVenue(venueId)
-        .then(() => {
-          alert("Venue deleted successfully");
-          fetchVenues();
-        })
-        .catch(error => {
-          console.error("Error deleting venue:", error);
-          alert("Failed to delete venue");
-        });
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="card max-w-md mx-auto text-center">
-        <p className="text-muted">Loading venues...</p>
-      </div>
-    );
-  }
-
+  /* ── render ────────────────────────────────────────────────────── */
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap justify-between items-center gap-4">
-        <div>
-          <div className="badge mb-2">Marketplace</div>
-          <h1 className="section-title">Venue scouting</h1>
-          <p className="section-subtitle">Compare capacity, equipment, and fit per genre.</p>
+    <div style={{ position: 'relative' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <div className="badge" style={{ marginBottom: 8 }}>Discover by venue</div>
+        <h1 className="section-title" style={{ fontSize: '1.8rem', marginBottom: 4 }}>
+          Irish Venues
+        </h1>
+        <p className="section-subtitle">
+          Explore Ireland's best live music spots and see what's on at each venue
+        </p>
+      </div>
+
+      {/* Search & Filter Bar */}
+      <div style={{
+        display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem',
+        padding: '0.75rem', background: 'var(--card)', borderRadius: 14,
+        border: '1px solid var(--line)'
+      }}>
+        <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="2"
+            style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }}>
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            className="input"
+            placeholder="Search venues..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && fetchVenues()}
+            style={{ paddingLeft: 36, width: '100%' }}
+          />
         </div>
-        <button onClick={() => openModal()} className="btn btn-primary">Add Venue</button>
+        {cities.length > 0 && (
+          <select className="input" value={cityFilter} onChange={e => setCityFilter(e.target.value)}
+            style={{ minWidth: 140 }}>
+            <option value="">All cities</option>
+            {cities.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        {genres.length > 0 && (
+          <select className="input" value={genreFilter} onChange={e => setGenreFilter(e.target.value)}
+            style={{ minWidth: 140 }}>
+            <option value="">All genres</option>
+            {genres.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+        )}
+        <button className="btn btn-primary btn-sm" onClick={fetchVenues}>Search</button>
       </div>
 
-      <div className="card grid gap-4 md:grid-cols-4">
-        <input
-          className="input"
-          placeholder="Search name"
-          value={filters.q}
-          onChange={(e) => setFilters({ ...filters, q: e.target.value })}
-        />
-        <input
-          className="input"
-          placeholder="City"
-          value={filters.city}
-          onChange={(e) => setFilters({ ...filters, city: e.target.value })}
-        />
-        <input
-          className="input"
-          placeholder="Genre focus"
-          value={filters.genreFocus}
-          onChange={(e) => setFilters({ ...filters, genreFocus: e.target.value })}
-        />
-        <input
-          className="input"
-          type="number"
-          placeholder="Min capacity"
-          value={filters.capacityMin}
-          onChange={(e) => setFilters({ ...filters, capacityMin: e.target.value })}
-        />
-        <input
-          className="input"
-          type="number"
-          placeholder="Max capacity"
-          value={filters.capacityMax}
-          onChange={(e) => setFilters({ ...filters, capacityMax: e.target.value })}
-        />
-        <div className="flex flex-wrap gap-2 md:col-span-4">
-          <button className="btn btn-primary" onClick={runSearch} disabled={searching}>
-            {searching ? 'Searching…' : 'Search venues'}
-          </button>
-          <button className="btn btn-outline" onClick={resetSearch}>Reset</button>
+      {/* Stats strip */}
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+        <div className="stat-pill">
+          <span style={{ color: 'var(--emerald)' }}>📍</span>
+          <span>{filteredVenues.length} venue{filteredVenues.length !== 1 ? 's' : ''}</span>
         </div>
-      </div>
-
-      <div className="grid-auto">
-        {venues.map(venue => (
-          <motion.div
-            key={venue.id}
-            className="card flex flex-col gap-2"
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">{venue.name}</h2>
-              <span className="chip">{venue.capacity ? `${venue.capacity} cap` : 'Capacity TBA'}</span>
-            </div>
-            <p className="text-muted text-sm">{venue.address || 'Address pending'}</p>
-            <div className="grid gap-1 text-sm">
-              <span>Genre focus: {venue.genreFocus || '—'}</span>
-              <span>Latitude: {venue.latitude || '—'}</span>
-              <span>Longitude: {venue.longitude || '—'}</span>
-            </div>
-            <p className="text-muted text-sm">{venue.notes || 'No notes yet.'}</p>
-            <div className="flex gap-2 mt-3">
-              <button onClick={() => openModal(venue)} className="btn btn-outline">Edit</button>
-              <button onClick={() => openAvailability(venue)} className="btn btn-outline">Availability</button>
-              <button onClick={() => handleDeleteVenue(venue.id)} className="btn btn-ghost">Delete</button>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-
-      {/* Modal for Add/Edit Venue */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="glass p-6 w-11/12 max-w-md relative">
-            <h2 className="section-title mb-4">{editingVenue ? 'Edit Venue' : 'Add Venue'}</h2>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div>
-                <label className="block mb-1 text-sm font-semibold">Name</label>
-                <input type="text" {...register("name", { required: true })} className="input" />
-              </div>
-              <div>
-                <label className="block mb-1 text-sm font-semibold">Address</label>
-                <input type="text" {...register("address", { required: true })} className="input" />
-              </div>
-              <div>
-                <label className="block mb-1 text-sm font-semibold">Capacity</label>
-                <input type="number" {...register("capacity")} className="input" />
-              </div>
-              <div>
-                <label className="block mb-1 text-sm font-semibold">Genre Focus</label>
-                <input type="text" {...register("genreFocus")} className="input" />
-              </div>
-              <div>
-                <label className="block mb-1 text-sm font-semibold">Latitude</label>
-                <input type="number" step="0.000001" {...register("latitude")} className="input" />
-              </div>
-              <div>
-                <label className="block mb-1 text-sm font-semibold">Longitude</label>
-                <input type="number" step="0.000001" {...register("longitude")} className="input" />
-              </div>
-              <div>
-                <label className="block mb-1 text-sm font-semibold">Notes</label>
-                <textarea {...register("notes")} className="input" rows="3" />
-              </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={closeModal} className="btn btn-outline">Cancel</button>
-                <button type="submit" className="btn btn-primary">{editingVenue ? 'Update' : 'Add'}</button>
-              </div>
-            </form>
+        {cities.length > 0 && (
+          <div className="stat-pill">
+            <span style={{ color: 'var(--emerald)' }}>🏙️</span>
+            <span>{cities.length} cit{cities.length !== 1 ? 'ies' : 'y'}</span>
           </div>
+        )}
+      </div>
+
+      {/* Venue Grid */}
+      {loading ? (
+        <div className="grid-auto">
+          {[...Array(6)].map((_, i) => <VenueSkeleton key={i} />)}
+        </div>
+      ) : filteredVenues.length === 0 ? (
+        <div style={{
+          textAlign: 'center', padding: '3rem 1rem',
+          background: 'var(--card)', borderRadius: 16, border: '1px solid var(--line)'
+        }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🏛️</div>
+          <h3 style={{ color: 'var(--ink)', marginBottom: 4 }}>No venues found</h3>
+          <p style={{ color: 'var(--ink-3)', fontSize: '0.88rem' }}>
+            Try adjusting your search or filters
+          </p>
+        </div>
+      ) : (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+          gap: '1rem'
+        }}>
+          {filteredVenues.map((venue, idx) => (
+            <div
+              key={venue.id}
+              className="card-venue"
+              onClick={() => openVenueEvents(venue)}
+              style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 40px rgba(0,214,125,0.08)'; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
+            >
+              {/* Venue image / placeholder */}
+              <div style={{
+                height: 170, borderRadius: '12px 12px 0 0', overflow: 'hidden', position: 'relative',
+                background: venue.image_url ? 'transparent' : VENUE_COLORS[idx % VENUE_COLORS.length],
+              }}>
+                {venue.image_url ? (
+                  <img src={venue.image_url} alt={venue.name}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <div style={{
+                    width: '100%', height: '100%', display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', flexDirection: 'column', gap: 4
+                  }}>
+                    <div style={{ fontSize: '2.5rem', opacity: 0.6 }}>
+                      {getGenreIcon(venue.genreFocus)}
+                    </div>
+                    <div style={{
+                      fontSize: '1.3rem', fontWeight: 700, color: 'rgba(255,255,255,0.25)',
+                      letterSpacing: '0.04em'
+                    }}>
+                      {(venue.name || '')[0]?.toUpperCase()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Capacity badge */}
+                {venue.capacity && (
+                  <div style={{
+                    position: 'absolute', top: 10, right: 10,
+                    background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+                    padding: '0.25rem 0.55rem', borderRadius: 8,
+                    fontSize: '0.7rem', fontWeight: 600, color: 'var(--ink-2)'
+                  }}>
+                    {venue.capacity} cap
+                  </div>
+                )}
+
+                {/* City badge */}
+                {(venue.city || venue.address) && (
+                  <div style={{
+                    position: 'absolute', bottom: 10, left: 10,
+                    background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+                    padding: '0.2rem 0.5rem', borderRadius: 6,
+                    fontSize: '0.68rem', fontWeight: 500, color: 'var(--ink-2)',
+                    display: 'flex', alignItems: 'center', gap: 4
+                  }}>
+                    <span style={{ color: 'var(--emerald)' }}>📍</span>
+                    {venue.city || venue.address?.split(',').pop()?.trim() || 'Ireland'}
+                  </div>
+                )}
+              </div>
+
+              {/* Venue info */}
+              <div style={{ padding: '0.85rem 1rem' }}>
+                <h3 style={{
+                  fontSize: '1rem', fontWeight: 700, color: 'var(--ink)', marginBottom: 4,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                }}>
+                  {venue.name}
+                </h3>
+                {venue.address && (
+                  <p style={{
+                    fontSize: '0.78rem', color: 'var(--ink-3)', marginBottom: 6,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                  }}>
+                    {venue.address}
+                  </p>
+                )}
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  {venue.genreFocus && (
+                    <span className="chip" style={{ fontSize: '0.68rem' }}>
+                      {getGenreIcon(venue.genreFocus)} {venue.genreFocus}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {availabilityOpen && availabilityVenue && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="glass p-6 w-11/12 max-w-2xl relative space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="section-title">Availability · {availabilityVenue.name}</h2>
-              <button className="btn btn-ghost" onClick={closeAvailability}>Close</button>
-            </div>
-            <div className="grid gap-3 md:grid-cols-4">
-              <input
-                className="input"
-                type="datetime-local"
-                value={availabilityForm.start_time}
-                onChange={(e) => setAvailabilityForm({ ...availabilityForm, start_time: e.target.value })}
-              />
-              <input
-                className="input"
-                type="datetime-local"
-                value={availabilityForm.end_time}
-                onChange={(e) => setAvailabilityForm({ ...availabilityForm, end_time: e.target.value })}
-              />
-              <select
-                className="input"
-                value={availabilityForm.status}
-                onChange={(e) => setAvailabilityForm({ ...availabilityForm, status: e.target.value })}
+      {/* ── Venue Events Drawer / Modal ──────────────────────────────── */}
+      {selectedVenue && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 100,
+          display: 'flex', justifyContent: 'flex-end'
+        }}>
+          {/* Backdrop */}
+          <div
+            onClick={closeVenuePanel}
+            style={{
+              position: 'absolute', inset: 0,
+              background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)'
+            }}
+          />
+
+          {/* Panel */}
+          <div style={{
+            position: 'relative', width: '100%', maxWidth: 520,
+            background: 'var(--bg)', borderLeft: '1px solid var(--line)',
+            overflowY: 'auto', display: 'flex', flexDirection: 'column',
+            animation: 'fadeIn 0.25s ease'
+          }}>
+            {/* Venue header */}
+            <div style={{
+              position: 'relative', height: 200, overflow: 'hidden', flexShrink: 0,
+              background: selectedVenue.image_url ? 'transparent' :
+                VENUE_COLORS[venues.findIndex(v => v.id === selectedVenue.id) % VENUE_COLORS.length]
+            }}>
+              {selectedVenue.image_url ? (
+                <img src={selectedVenue.image_url} alt={selectedVenue.name}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <div style={{
+                  width: '100%', height: '100%', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', fontSize: '4rem', opacity: 0.3
+                }}>
+                  {getGenreIcon(selectedVenue.genreFocus)}
+                </div>
+              )}
+
+              {/* Gradient overlay */}
+              <div style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0, height: '60%',
+                background: 'linear-gradient(transparent, var(--bg))'
+              }} />
+
+              {/* Close button */}
+              <button
+                onClick={closeVenuePanel}
+                style={{
+                  position: 'absolute', top: 12, right: 12,
+                  width: 36, height: 36, borderRadius: 10,
+                  background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: 'var(--ink)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem'
+                }}
               >
-                <option value="available">Available</option>
-                <option value="hold">Hold</option>
-                <option value="booked">Booked</option>
-              </select>
-              <input
-                className="input"
-                placeholder="Notes"
-                value={availabilityForm.notes}
-                onChange={(e) => setAvailabilityForm({ ...availabilityForm, notes: e.target.value })}
-              />
-              <div className="md:col-span-4">
-                <button className="btn btn-primary" onClick={addAvailability}>Add window</button>
+                ✕
+              </button>
+
+              {/* Venue name overlay */}
+              <div style={{
+                position: 'absolute', bottom: 16, left: 20, right: 20
+              }}>
+                <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--ink)', marginBottom: 4 }}>
+                  {selectedVenue.name}
+                </h2>
+                {selectedVenue.address && (
+                  <p style={{ fontSize: '0.82rem', color: 'var(--ink-2)' }}>
+                    📍 {selectedVenue.address}
+                  </p>
+                )}
               </div>
             </div>
-            {availabilityLoading ? (
-              <div className="card text-center text-muted">Loading availability…</div>
-            ) : availabilityItems.length === 0 ? (
-              <div className="card text-center text-muted">No availability windows yet.</div>
-            ) : (
-              <div className="grid gap-2">
-                {availabilityItems.map(item => (
-                  <div key={item.id} className="card flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-semibold">{item.status}</div>
-                      <div className="text-xs text-muted">
-                        {item.start_time} → {item.end_time}
-                      </div>
-                      {item.notes && <div className="text-xs text-muted">{item.notes}</div>}
-                    </div>
-                    <button className="btn btn-ghost" onClick={() => deleteAvailability(item.id)}>Delete</button>
-                  </div>
-                ))}
+
+            {/* Venue meta */}
+            <div style={{
+              display: 'flex', gap: '0.5rem', flexWrap: 'wrap',
+              padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--line)'
+            }}>
+              {selectedVenue.capacity && (
+                <div className="stat-pill">
+                  <span>👥</span>
+                  <span>{selectedVenue.capacity} capacity</span>
+                </div>
+              )}
+              {selectedVenue.genreFocus && (
+                <div className="stat-pill">
+                  <span>{getGenreIcon(selectedVenue.genreFocus)}</span>
+                  <span>{selectedVenue.genreFocus}</span>
+                </div>
+              )}
+              {selectedVenue.notes && (
+                <p style={{ width: '100%', fontSize: '0.8rem', color: 'var(--ink-3)', marginTop: 4 }}>
+                  {selectedVenue.notes}
+                </p>
+              )}
+            </div>
+
+            {/* Events at this venue */}
+            <div style={{ padding: '1rem 1.25rem', flex: 1 }}>
+              <h3 style={{
+                fontSize: '0.92rem', fontWeight: 700, color: 'var(--ink)',
+                marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: 6
+              }}>
+                <span style={{ color: 'var(--emerald)' }}>🎫</span>
+                Events at {selectedVenue.name}
+                {!eventsLoading && (
+                  <span style={{
+                    marginLeft: 'auto', fontSize: '0.72rem', color: 'var(--ink-3)',
+                    fontWeight: 500
+                  }}>
+                    {venueEvents.length} event{venueEvents.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </h3>
+
+              {eventsLoading ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {[...Array(4)].map((_, i) => (
+                    <div key={i} className="skeleton" style={{ height: 80, borderRadius: 12 }} />
+                  ))}
+                </div>
+              ) : venueEvents.length === 0 ? (
+                <div style={{
+                  textAlign: 'center', padding: '2rem 1rem',
+                  background: 'rgba(255,255,255,0.02)', borderRadius: 14,
+                  border: '1px solid var(--line)'
+                }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔇</div>
+                  <p style={{ color: 'var(--ink-3)', fontSize: '0.85rem' }}>
+                    No upcoming events found at this venue
+                  </p>
+                  <p style={{ color: 'var(--ink-3)', fontSize: '0.75rem', marginTop: 4 }}>
+                    Check back soon or set an alert for this venue
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {venueEvents.map(event => (
+                    <VenueEventCard
+                      key={event.id}
+                      event={event}
+                      onSave={handleSaveEvent}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Organizer actions (only for admins/organizers) */}
+            {isOrganizer && (
+              <div style={{
+                padding: '0.75rem 1.25rem', borderTop: '1px solid var(--line)',
+                background: 'rgba(255,255,255,0.02)', flexShrink: 0
+              }}>
+                <p style={{ fontSize: '0.72rem', color: 'var(--ink-3)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Organizer tools
+                </p>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button className="btn btn-outline btn-sm" style={{ fontSize: '0.75rem' }}
+                    onClick={() => {/* TODO: link to organizer venue edit */ }}>
+                    Edit venue
+                  </button>
+                  <button className="btn btn-outline btn-sm" style={{ fontSize: '0.75rem' }}
+                    onClick={() => {/* TODO: link to availability */ }}>
+                    Availability
+                  </button>
+                </div>
               </div>
             )}
           </div>

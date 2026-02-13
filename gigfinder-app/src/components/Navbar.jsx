@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { getToken, setToken, setUser, getUser } from '../services/apiClient';
 
 const Navbar = ({ setIsAuthenticated }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const handleLogout = () => {
@@ -17,21 +18,38 @@ const Navbar = ({ setIsAuthenticated }) => {
   const user = getUser();
   const isOrganizer = user?.role === 'organizer' || user?.role === 'admin';
 
+  const isActive = (path) => location.pathname === path;
+
+  const navItems = [
+    { to: '/dashboard', label: 'Home' },
+    { to: '/discover', label: 'Discover' },
+    { to: '/djs', label: 'Artists' },
+    { to: '/venues', label: 'Venues' },
+    { to: '/preferences', label: 'Taste' },
+  ];
+
+  if (isOrganizer) navItems.push({ to: '/organizer', label: 'Organizer' });
+
   return (
     <nav className="nav-shell">
       <div className="nav-inner">
-        <div className="flex items-center gap-12">
+        <div className="flex items-center gap-8">
           <Link to={isAuthenticated ? '/dashboard' : '/auth/login'} className="brand">
-            🎵 WhatsTheCraic
+            <div className="brand-icon">W</div>
+            <span>WhatsTheCraic</span>
           </Link>
           {isAuthenticated && (
             <div className="hidden md:flex nav-links">
-              <Link to="/dashboard" className="nav-link">Overview</Link>
-              <Link to="/discover" className="nav-link">Discover</Link>
-              <Link to="/preferences" className="nav-link">Preferences</Link>
-              <Link to="/djs" className="nav-link">DJs</Link>
-              <Link to="/venues" className="nav-link">Venues</Link>
-              {isOrganizer && <Link to="/organizer" className="nav-link">Organizer</Link>}
+              {navItems.map(item => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={`nav-link ${isActive(item.to) ? 'active' : ''}`}
+                  style={isActive(item.to) ? { color: 'var(--ink)', background: 'rgba(255,255,255,0.06)' } : {}}
+                >
+                  {item.label}
+                </Link>
+              ))}
             </div>
           )}
         </div>
@@ -39,40 +57,79 @@ const Navbar = ({ setIsAuthenticated }) => {
           {isAuthenticated ? (
             <>
               <div className="hidden sm:flex items-center gap-3">
-                <span className="chip">{user?.name || 'Member'}</span>
-                <button
-                  onClick={handleLogout}
-                  className="btn btn-outline"
-                >
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  padding: '0.35rem 0.7rem 0.35rem 0.4rem',
+                  borderRadius: 8, background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid var(--line)'
+                }}>
+                  <div style={{
+                    width: 26, height: 26, borderRadius: 7,
+                    background: 'var(--emerald-dim)', color: 'var(--emerald)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.7rem', fontWeight: 700
+                  }}>
+                    {(user?.name || 'U')[0].toUpperCase()}
+                  </div>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 500, color: 'var(--ink-2)' }}>
+                    {user?.name || 'Member'}
+                  </span>
+                </div>
+                <button onClick={handleLogout} className="btn btn-ghost btn-sm">
                   Sign out
                 </button>
               </div>
               <div className="md:hidden">
                 <button
                   onClick={() => setMenuOpen(!menuOpen)}
-                  className="btn btn-ghost"
+                  className="btn btn-ghost btn-icon"
+                  style={{ fontSize: '1.2rem' }}
                 >
-                  ☰
+                  {menuOpen ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                  )}
                 </button>
               </div>
             </>
           ) : (
             <>
-              <Link to="/auth/login" className="btn btn-ghost hidden sm:inline-flex">Sign in</Link>
-              <Link to="/auth/signup" className="btn btn-primary">Get started</Link>
+              <Link to="/auth/login" className="btn btn-ghost btn-sm hidden sm:inline-flex">Sign in</Link>
+              <Link to="/auth/signup" className="btn btn-primary btn-sm">Get started</Link>
             </>
           )}
         </div>
       </div>
 
+      {/* Mobile menu */}
       {menuOpen && isAuthenticated && (
-        <div className="md:hidden border-t border-line px-4 py-4 space-y-2">
-          <Link to="/dashboard" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Overview</Link>
-          <Link to="/discover" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Discover</Link>
-          <Link to="/preferences" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Preferences</Link>
-          <Link to="/djs" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">DJs</Link>
-          <Link to="/venues" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Venues</Link>
-          {isOrganizer && <Link to="/organizer" className="block py-2 text-sm font-medium text-muted hover:text-ink transition-colors">Organizer</Link>}
+        <div style={{
+          borderTop: '1px solid var(--line)',
+          padding: '0.75rem 1rem',
+          background: 'rgba(10, 10, 10, 0.95)'
+        }}>
+          {navItems.map(item => (
+            <Link
+              key={item.to}
+              to={item.to}
+              onClick={() => setMenuOpen(false)}
+              className="nav-link"
+              style={{
+                display: 'block',
+                padding: '0.65rem 0.75rem',
+                borderRadius: 8,
+                ...(isActive(item.to) ? { color: 'var(--ink)', background: 'rgba(255,255,255,0.06)' } : {})
+              }}
+            >
+              {item.label}
+            </Link>
+          ))}
+          <div style={{ borderTop: '1px solid var(--line)', marginTop: '0.5rem', paddingTop: '0.5rem' }}>
+            <button onClick={handleLogout} className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start' }}>
+              Sign out
+            </button>
+          </div>
         </div>
       )}
     </nav>

@@ -1,95 +1,141 @@
 import React, { useEffect, useState } from 'react';
-import { Doughnut, Bar } from 'react-chartjs-2';
-import { Chart, registerables } from 'chart.js';
+import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import eventsAPI from '../services/eventsAPI';
 import djAPI from '../services/djAPI';
 import venueAPI from '../services/venueAPI';
 import authAPI from '../services/authAPI';
 import { getToken } from '../services/apiClient';
 
-Chart.register(...registerables);
-Chart.defaults.font.family = 'Space Grotesk, system-ui, sans-serif';
-Chart.defaults.color = '#c7d0d9';
-
-const chartOptions = {
-  plugins: {
-    legend: {
-      labels: { font: { size: 13 } }
-    },
-    tooltip: {
-      bodyFont: { size: 13 },
-      titleFont: { size: 14 }
-    }
-  },
-  layout: { padding: 12 }
+const formatDate = (iso) => {
+  if (!iso) return 'TBA';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'TBA';
+  return d.toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short' });
 };
 
-const computeEventsByCity = (events = []) => {
-  const cityCount = {};
-  events.forEach(event => {
-    if (event.city) {
-      const city = event.city.trim();
-      cityCount[city] = (cityCount[city] || 0) + 1;
-    }
-  });
-  const labels = Object.keys(cityCount);
-  const data = labels.map(city => cityCount[city]);
-  const palette = [
-    '#00f5a0',
-    '#00c2ff',
-    '#ffb454',
-    '#ff6b6b',
-    '#8c7bff',
-    '#3c455a'
-  ];
-  return {
-    labels,
-    datasets: [{ label: 'Events by City', data, backgroundColor: labels.map((_, i) => palette[i % palette.length]) }]
-  };
+const formatTime = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
 };
 
-const computeTopDJsByFee = (djs = []) => {
-  const sorted = djs
-    .filter(dj => dj.numeric_fee !== null && dj.numeric_fee !== undefined)
-    .sort((a, b) => parseFloat(b.numeric_fee) - parseFloat(a.numeric_fee))
-    .slice(0, 5);
-  return {
-    labels: sorted.map(dj => dj.dj_name),
-    datasets: [
-      {
-        label: 'Top DJs by Fee',
-        data: sorted.map(dj => parseFloat(dj.numeric_fee)),
-        backgroundColor: '#00c2ff'
-      }
-    ]
-  };
+const GENRE_FILTERS = ['All', 'Electronic', 'Techno', 'House', 'Trad', 'Rock', 'Hip-Hop', 'Jazz', 'Pop', 'Folk'];
+
+const EventCard = ({ event, index, saved, onSave }) => {
+  const image = event.images?.[0]?.url;
+  return (
+    <motion.div
+      className="card-event"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.04 }}
+    >
+      <div className="card-event-img-wrap">
+        {image ? (
+          <img src={image} alt={event.title} className="card-event-img" loading="lazy" />
+        ) : (
+          <div className="card-event-img-placeholder">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--muted-2)' }}>
+              <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+            </svg>
+          </div>
+        )}
+        <div className="card-event-overlay">
+          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--emerald)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            {formatDate(event.start_time)}
+          </span>
+        </div>
+      </div>
+      <div className="card-event-body">
+        <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: '0.35rem' }}>
+          {event.title}
+        </h3>
+        <div className="venue-strip">
+          <div className="venue-strip-dot" />
+          <span className="venue-strip-name">{event.venue_name || 'Venue TBA'}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.6rem' }}>
+          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+            {(event.genres || []).slice(0, 2).map(g => (
+              <span key={g} className="chip" style={{ fontSize: '0.68rem', padding: '0.2rem 0.5rem' }}>{g}</span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '0.35rem' }}>
+            {event.ticket_url && (
+              <a href={event.ticket_url} target="_blank" rel="noreferrer"
+                className="btn btn-sm btn-primary" style={{ fontSize: '0.72rem', padding: '0.3rem 0.65rem' }}>
+                Tickets
+              </a>
+            )}
+            <button onClick={() => onSave(event.id)}
+              className={`btn btn-sm ${saved ? 'btn-outline' : 'btn-ghost'}`}
+              style={{ fontSize: '0.85rem', padding: '0.3rem 0.5rem' }}>
+              {saved ? '\u2764\uFE0F' : '\u2661'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
 };
 
-const computeEventCountByVenue = (events = [], venues = []) => {
-  const venueEventCount = {};
-  events.forEach(event => {
-    if (event.venue_name) {
-      const venueName = event.venue_name.trim().toLowerCase();
-      venueEventCount[venueName] = (venueEventCount[venueName] || 0) + 1;
-    }
-  });
-  const labels = venues.map(venue => venue.name);
-  const data = labels.map(label => {
-    const key = label.trim().toLowerCase();
-    return venueEventCount[key] || 0;
-  });
-  return {
-    labels,
-    datasets: [{ label: 'Events per Venue', data, backgroundColor: '#00f5a0' }]
-  };
+const HeroBanner = ({ event }) => {
+  if (!event) return null;
+  const image = event.images?.[0]?.url;
+  return (
+    <Link to="/discover" className="hero-banner" style={{ minHeight: 380 }}>
+      {image ? (
+        <img src={image} alt={event.title} className="hero-banner-img" />
+      ) : (
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, #1a1a1a, #0a0a0a)' }} />
+      )}
+      <div className="hero-banner-overlay" />
+      <div className="hero-banner-content">
+        <span className="badge" style={{ marginBottom: '0.6rem' }}>Featured</span>
+        <h2 style={{ fontSize: 'clamp(1.4rem, 3vw, 2.2rem)', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1.15, marginBottom: '0.5rem' }}>
+          {event.title}
+        </h2>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', color: 'var(--muted)', fontSize: '0.9rem' }}>
+          <span>{event.venue_name || 'Venue TBA'}</span>
+          <span style={{ color: 'var(--emerald)' }}>{formatDate(event.start_time)} {formatTime(event.start_time) && `\u00B7 ${formatTime(event.start_time)}`}</span>
+        </div>
+      </div>
+    </Link>
+  );
+};
+
+const SmallHeroCard = ({ event }) => {
+  if (!event) return null;
+  const image = event.images?.[0]?.url;
+  return (
+    <Link to="/discover" className="hero-banner" style={{ minHeight: 180 }}>
+      {image ? (
+        <img src={image} alt={event.title} className="hero-banner-img" />
+      ) : (
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, #1e1e1e, #111)' }} />
+      )}
+      <div className="hero-banner-overlay" />
+      <div className="hero-banner-content" style={{ padding: '1rem' }}>
+        <h3 style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.25, marginBottom: '0.25rem' }} className="line-clamp-2">
+          {event.title}
+        </h3>
+        <span style={{ fontSize: '0.75rem', color: 'var(--emerald)' }}>{formatDate(event.start_time)}</span>
+      </div>
+    </Link>
+  );
 };
 
 const Dashboard = () => {
   const [events, setEvents] = useState([]);
+  const [feedEvents, setFeedEvents] = useState([]);
   const [djs, setDjs] = useState([]);
   const [venues, setVenues] = useState([]);
   const [spotifyStatus, setSpotifyStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [activeGenre, setActiveGenre] = useState('All');
+  const [savedIds, setSavedIds] = useState(new Set());
 
   const token = getToken();
   const authBase = process.env.REACT_APP_AUTH_BASE || 'https://auth.whatsthecraic.run.place';
@@ -98,131 +144,319 @@ const Dashboard = () => {
     const load = async () => {
       setLoading(true);
       try {
-        const [eventsRes, djsRes, venuesRes] = await Promise.all([
+        const requests = [
           eventsAPI.searchEvents({}),
           djAPI.getAllDJs(),
           venueAPI.getAllVenues()
-        ]);
-        setEvents(eventsRes.events || []);
-        setDjs(Array.isArray(djsRes) ? djsRes : []);
-        setVenues(Array.isArray(venuesRes) ? venuesRes : []);
+        ];
+        if (token) requests.push(eventsAPI.getFeed({}));
+
+        const results = await Promise.all(requests);
+        setEvents(results[0].events || []);
+        setDjs(Array.isArray(results[1]) ? results[1] : []);
+        setVenues(Array.isArray(results[2]) ? results[2] : []);
+        if (results[3]) setFeedEvents(results[3].events || []);
       } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+        console.error('Dashboard load error:', error);
       } finally {
         setLoading(false);
       }
     };
-
     load();
-  }, []);
+  }, [token]);
 
   useEffect(() => {
-    const loadSpotify = async () => {
-      if (!token) return;
-      try {
-        const status = await authAPI.getSpotifyStatus();
-        setSpotifyStatus(status);
-      } catch (error) {
-        setSpotifyStatus(null);
-      }
-    };
-    loadSpotify();
+    if (!token) return;
+    authAPI.getSpotifyStatus()
+      .then(setSpotifyStatus)
+      .catch(() => setSpotifyStatus(null));
   }, [token]);
+
+  const handleSave = async (id) => {
+    try {
+      await eventsAPI.saveEvent(id);
+      setSavedIds(prev => new Set([...prev, id]));
+    } catch (e) { console.error('Save failed:', e); }
+  };
+
+  // Prioritize events with images
+  const eventsWithImages = events.filter(e => e.images?.[0]?.url);
+  const heroEvents = eventsWithImages.length >= 3 ? eventsWithImages : events;
+
+  // Filter events by genre
+  const filteredEvents = activeGenre === 'All'
+    ? events
+    : events.filter(e => (e.genres || []).some(g => g.toLowerCase().includes(activeGenre.toLowerCase())));
+
+  // Personalized or trending
+  const personalizedEvents = feedEvents.length > 0 ? feedEvents : events;
+
+  // Upcoming events sorted
+  const upcoming = [...events]
+    .filter(e => new Date(e.start_time) > new Date())
+    .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-96">
-        <div className="text-center">
-          <div className="inline-block w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin mb-4"></div>
-          <p className="text-muted">Loading your dashboard...</p>
+      <div className="space-y-6">
+        <div className="skeleton" style={{ height: 380, borderRadius: 18 }} />
+        <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="skeleton" style={{ height: 300, borderRadius: 14 }} />
+          ))}
         </div>
       </div>
     );
   }
 
-  const cityChart = computeEventsByCity(events);
-  const djChart = computeTopDJsByFee(djs);
-  const venueChart = computeEventCountByVenue(events, venues);
-
   return (
-    <div className="space-y-8">
-      {/* Personalization & Sync Section */}
-      <section className="card animate-fade-up">
-        <div className="flex items-start justify-between gap-6">
-          <div>
-            <div className="badge mb-3">Get Started</div>
-            <h2 className="section-title mb-2">Personalize your feed</h2>
-            <p className="section-subtitle">
-              Connect Spotify to get smarter recommendations and discover events tailored to your taste.
-            </p>
+    <div className="space-y-10">
+      {/* ─── HERO GRID ─── */}
+      <section className="grid-hero animate-fade-up">
+        <HeroBanner event={heroEvents[0]} />
+        <SmallHeroCard event={heroEvents[1]} />
+        <SmallHeroCard event={heroEvents[2]} />
+      </section>
+
+      {/* ─── SPOTIFY CTA ─── */}
+      {token && !spotifyStatus?.linked && (
+        <motion.section
+          className="spotify-cta animate-fade-up"
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="spotify-cta-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381C8.88 5.82 15.78 6.12 20.1 8.82c.54.3.72 1.02.42 1.56-.299.421-1.02.599-1.439.3z" />
+            </svg>
           </div>
-          <div className="text-4xl">🎵</div>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.2rem' }}>Get personalized picks</h3>
+            <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>Connect Spotify to see events matched to your music taste</p>
+          </div>
+          <a className="btn" href={`${authBase}/auth/spotify/login?token=${token}`}>Connect</a>
+        </motion.section>
+      )}
+
+      {token && spotifyStatus?.linked && (
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.85rem 1.25rem', background: 'rgba(29, 185, 84, 0.08)', borderColor: 'rgba(29, 185, 84, 0.15)' }}>
+          <span style={{ color: '#1DB954', fontSize: '1.1rem' }}>&#10003;</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--ink-2)' }}>Spotify connected &middot; {spotifyStatus?.last_synced_at ? `Last synced ${new Date(spotifyStatus.last_synced_at).toLocaleDateString('en-IE')}` : 'Syncing...'}</span>
+          <button className="btn btn-sm btn-ghost" style={{ marginLeft: 'auto' }}
+            onClick={() => authAPI.syncSpotify().catch(() => {})}>Sync now</button>
         </div>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <a
-            className="btn btn-primary"
-            href={token ? `${authBase}/auth/spotify/login?token=${token}` : '/auth/login'}
-          >
-            {spotifyStatus?.linked ? '🔄 Re-link Spotify' : '🎵 Connect Spotify'}
-          </a>
-          {spotifyStatus?.linked && (
+      )}
+
+      {/* ─── FOR YOU (Personalized) ─── */}
+      {token && personalizedEvents.length > 0 && (
+        <section>
+          <div className="section-header">
+            <h2 className="section-header-title">For you</h2>
+            <Link to="/discover" className="section-header-link">See all &rarr;</Link>
+          </div>
+          <div className="scroll-row">
+            {personalizedEvents.slice(0, 12).map((event, i) => {
+              const img = event.images?.[0]?.url;
+              return (
+                <div key={event.id || i} className="card-event" style={{ width: 220, flexShrink: 0 }}>
+                  <div className="card-event-img-wrap" style={{ paddingTop: '100%' }}>
+                    {img ? (
+                      <img src={img} alt={event.title} className="card-event-img" loading="lazy" />
+                    ) : (
+                      <div className="card-event-img-placeholder">
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--muted-2)' }}>
+                          <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                  <div className="card-event-body">
+                    <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.88rem', lineHeight: 1.3, marginBottom: '0.3rem' }}>{event.title}</h3>
+                    <div className="venue-strip">
+                      <div className="venue-strip-dot" />
+                      <span className="venue-strip-name">{event.venue_name || 'TBA'}</span>
+                    </div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--emerald)', fontWeight: 600, display: 'block', marginTop: '0.3rem' }}>
+                      {formatDate(event.start_time)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* ─── QUICK STATS ─── */}
+      <section className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+        <div className="stat-pill animate-fade-up">
+          <div className="stat-pill-icon" style={{ background: 'var(--emerald-dim)', color: 'var(--emerald)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </div>
+          <div>
+            <div className="stat-pill-value text-emerald">{events.length}</div>
+            <div className="stat-pill-label">Events</div>
+          </div>
+        </div>
+        <div className="stat-pill animate-fade-up">
+          <div className="stat-pill-icon" style={{ background: 'var(--gold-dim)', color: 'var(--gold)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          </div>
+          <div>
+            <div className="stat-pill-value text-gold">{djs.length}</div>
+            <div className="stat-pill-label">Artists</div>
+          </div>
+        </div>
+        <div className="stat-pill animate-fade-up">
+          <div className="stat-pill-icon" style={{ background: 'var(--sky-dim)', color: 'var(--sky)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>
+          </div>
+          <div>
+            <div className="stat-pill-value text-sky">{venues.length}</div>
+            <div className="stat-pill-label">Venues</div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── BROWSE BY GENRE ─── */}
+      <section>
+        <div className="section-header">
+          <h2 className="section-header-title">Browse events</h2>
+          <Link to="/discover" className="section-header-link">All events &rarr;</Link>
+        </div>
+        <div className="filter-row" style={{ marginBottom: '1.25rem' }}>
+          {GENRE_FILTERS.map(g => (
             <button
-              className="btn btn-outline"
-              onClick={() => authAPI.syncSpotify().catch(() => {})}
+              key={g}
+              className={`filter-chip ${activeGenre === g ? 'filter-chip-active' : ''}`}
+              onClick={() => setActiveGenre(g)}
             >
-              Sync Now
+              {g}
             </button>
-          )}
-          <a className="btn btn-outline" href="/preferences">
-            Customize Preferences
-          </a>
+          ))}
         </div>
-        <p className="text-muted text-sm mt-4">
-          {spotifyStatus?.linked ? `✓ Connected • Last sync: ${spotifyStatus?.last_synced_at || 'pending'}` : 'Not connected yet'}
+        <div className="grid-events">
+          {filteredEvents.slice(0, 12).map((event, i) => (
+            <EventCard key={event.id || i} event={event} index={i} saved={savedIds.has(event.id)} onSave={handleSave} />
+          ))}
+        </div>
+        {filteredEvents.length === 0 && (
+          <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
+            <p style={{ color: 'var(--muted)', fontSize: '0.95rem' }}>No {activeGenre} events found. Try a different genre.</p>
+          </div>
+        )}
+      </section>
+
+      {/* ─── UPCOMING THIS WEEK ─── */}
+      {upcoming.length > 0 && (
+        <section>
+          <div className="section-header">
+            <h2 className="section-header-title">Coming up</h2>
+          </div>
+          <div className="scroll-row">
+            {upcoming.slice(0, 10).map((event, i) => {
+              const img = event.images?.[0]?.url;
+              return (
+                <div key={event.id || i} style={{ width: 300, flexShrink: 0 }} className="card" >
+                  <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+                    <div style={{
+                      width: 72, height: 72, borderRadius: 10, overflow: 'hidden',
+                      flexShrink: 0, background: 'var(--bg-3)'
+                    }}>
+                      {img ? (
+                        <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-2)' }}>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <h4 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.9rem', lineHeight: 1.3, marginBottom: '0.25rem' }}>{event.title}</h4>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.15rem' }}>{event.venue_name || 'TBA'}</p>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--emerald)', fontWeight: 600 }}>{formatDate(event.start_time)} {formatTime(event.start_time) && `\u00B7 ${formatTime(event.start_time)}`}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* ─── VENUES TO EXPLORE ─── */}
+      <section>
+        <div className="section-header">
+          <h2 className="section-header-title">Popular venues</h2>
+          <Link to="/venues" className="section-header-link">All venues &rarr;</Link>
+        </div>
+        <div className="scroll-row">
+          {venues.slice(0, 8).map((venue) => (
+            <Link to="/venues" key={venue.id} className="card-venue" style={{ width: 260, flexShrink: 0 }}>
+              <div className="card-venue-img-wrap">
+                <div style={{
+                  position: 'absolute', inset: 0,
+                  background: `linear-gradient(135deg, hsl(${(venue.id * 47) % 360}, 30%, 15%), hsl(${(venue.id * 83) % 360}, 20%, 10%))`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--muted-2)' }}>
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9,22 9,12 15,12 15,22" />
+                  </svg>
+                </div>
+              </div>
+              <div className="card-venue-body">
+                <h3 style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.2rem' }} className="line-clamp-1">{venue.name}</h3>
+                <p style={{ fontSize: '0.78rem', color: 'var(--muted)' }} className="line-clamp-1">{venue.address || 'Dublin, Ireland'}</p>
+                <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.4rem' }}>
+                  {venue.genreFocus && <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>{venue.genreFocus}</span>}
+                  {venue.capacity && <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>{venue.capacity} cap</span>}
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* ─── LOCAL IRISH DJs ─── */}
+      <section>
+        <div className="section-header">
+          <h2 className="section-header-title">Local Irish selection</h2>
+          <Link to="/djs" className="section-header-link">See all &rarr;</Link>
+        </div>
+        <div className="scroll-row">
+          {djs.slice(0, 10).map((dj) => (
+            <Link to="/djs" key={dj.dj_id} className="card-artist" style={{ width: 180, flexShrink: 0 }}>
+              <div className="card-artist-img-wrap">
+                <div style={{
+                  position: 'absolute', inset: 0,
+                  background: `linear-gradient(135deg, hsl(${(dj.dj_id * 67) % 360}, 40%, 18%), hsl(${(dj.dj_id * 31) % 360}, 25%, 12%))`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <span style={{ fontSize: '2rem', fontWeight: 800, color: 'rgba(255,255,255,0.15)' }}>
+                    {(dj.dj_name || '?')[0].toUpperCase()}
+                  </span>
+                </div>
+              </div>
+              <div className="card-artist-body">
+                <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.15rem' }}>{dj.dj_name}</h3>
+                <p className="line-clamp-1" style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{dj.genres || 'Various'}</p>
+                <span style={{ fontSize: '0.68rem', color: 'var(--emerald)' }}>{dj.city || 'Ireland'}</span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* ─── BOTTOM CTA ─── */}
+      <section className="card" style={{ textAlign: 'center', padding: '3rem 2rem', background: 'linear-gradient(135deg, rgba(0,214,125,0.06) 0%, rgba(0,0,0,0) 100%)', borderColor: 'rgba(0,214,125,0.12)' }}>
+        <h3 style={{ fontWeight: 800, fontSize: '1.3rem', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>
+          Discover what's on tonight
+        </h3>
+        <p style={{ color: 'var(--muted)', marginBottom: '1.25rem', fontSize: '0.9rem' }}>
+          Browse events across Ireland, filtered by your taste
         </p>
-      </section>
-
-      {/* Stats Overview */}
-      <section className="grid gap-4 md:grid-cols-3">
-        <div className="card animate-fade-up">
-          <p className="text-muted text-sm font-semibold">Events (90 days)</p>
-          <p className="text-4xl font-bold text-accent mt-2">{events.length}</p>
-        </div>
-        <div className="card animate-fade-up">
-          <p className="text-muted text-sm font-semibold">DJ Profiles</p>
-          <p className="text-4xl font-bold text-accent-2 mt-2">{djs.length}</p>
-        </div>
-        <div className="card animate-fade-up">
-          <p className="text-muted text-sm font-semibold">Venues Tracked</p>
-          <p className="text-4xl font-bold text-accent-3 mt-2">{venues.length}</p>
-        </div>
-      </section>
-
-      {/* Charts Section */}
-      <section className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
-        <div className="card">
-          <h3 className="text-lg font-bold mb-4">Events by City</h3>
-          <Doughnut data={cityChart} options={chartOptions} />
-        </div>
-        <div className="card">
-          <h3 className="text-lg font-bold mb-4">Top DJs by Fee</h3>
-          <Bar data={djChart} options={chartOptions} />
-        </div>
-        <div className="card">
-          <h3 className="text-lg font-bold mb-4">Events per Venue</h3>
-          <Bar data={venueChart} options={chartOptions} />
-        </div>
-      </section>
-
-      {/* Call to Action */}
-      <section className="card bg-gradient-to-r from-accent/10 to-accent-3/10 border-accent/20">
-        <div className="text-center py-8">
-          <h3 className="section-title mb-2">Ready to explore?</h3>
-          <p className="text-muted mb-6">Discover events tailored to your preferences</p>
-          <a href="/discover" className="btn btn-primary">
-            Start Discovering →
-          </a>
-        </div>
+        <Link to="/discover" className="btn btn-primary btn-lg">
+          Explore events
+        </Link>
       </section>
     </div>
   );
