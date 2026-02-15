@@ -125,7 +125,7 @@ jobs:
       - name: Build frontend
         working-directory: gigfinder-app
         run: |
-          npm ci
+          npm ci --legacy-peer-deps
           NODE_OPTIONS="--openssl-legacy-provider" npm run build
         env:
           CI: "false"
