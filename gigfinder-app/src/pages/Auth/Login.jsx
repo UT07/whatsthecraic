@@ -62,6 +62,11 @@ const Login = ({ setIsAuthenticated }) => {
               {errors.password && <span className="text-red-500 text-sm mt-1 block">Password is required.</span>}
             </div>
             {errorMessage && <p className="text-red-600 text-sm bg-red-50 p-3 rounded-md">{errorMessage}</p>}
+            <div className="text-right">
+              <Link to="/auth/forgot-password" className="text-sm text-accent hover:text-accent-2 transition-colors">
+                Forgot password?
+              </Link>
+            </div>
             <button type="submit" className="btn btn-primary w-full mt-6" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign in'}
             </button>

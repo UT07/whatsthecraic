@@ -1503,6 +1503,12 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
     city: z.string().optional(),
     from: z.string().optional(),
     to: z.string().optional(),
+    q: z.string().optional(),
+    genres: z.string().optional(),
+    artist: z.string().optional(),
+    venue: z.string().optional(),
+    priceMax: z.string().optional(),
+    source: z.enum(['eventbrite', 'ticketmaster', 'bandsintown', 'dice', 'local']).optional(),
     limit: z.string().optional(),
     offset: z.string().optional()
   });
@@ -1516,7 +1522,7 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
     return sendError(res, 401, 'unauthorized', 'Invalid user token');
   }
 
-  const { city, from, to, limit, offset } = parsed.data;
+  const { city, from, to, q, genres, artist, venue, priceMax, source, limit, offset } = parsed.data;
   const fromDate = parseDateParam(from, new Date());
   const toDate = parseDateParam(to, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
 
@@ -1540,6 +1546,41 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
     const placeholders = signals.preferredCities.map(() => '?').join(',');
     where.push(`LOWER(city) IN (${placeholders})`);
     params.push(...signals.preferredCities);
+  }
+
+  // Search/filter support for feed endpoint
+  if (q) {
+    const keyword = `%${q.toLowerCase()}%`;
+    where.push('(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(venue_name) LIKE ?)');
+    params.push(keyword, keyword, keyword);
+  }
+  if (genres) {
+    const list = genres.split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
+    list.forEach((genre) => {
+      where.push("JSON_SEARCH(genres, 'one', ?) IS NOT NULL");
+      params.push(genre);
+    });
+  }
+  if (artist) {
+    const keyword = `%${artist.toLowerCase()}%`;
+    where.push('(LOWER(title) LIKE ? OR JSON_SEARCH(tags, "one", ?) IS NOT NULL)');
+    params.push(keyword, normalizeToken(artist));
+  }
+  if (venue) {
+    const keyword = `%${venue.toLowerCase()}%`;
+    where.push('LOWER(venue_name) LIKE ?');
+    params.push(keyword);
+  }
+  if (priceMax) {
+    const max = Number.parseFloat(priceMax);
+    if (!Number.isNaN(max)) {
+      where.push('(price_min IS NULL OR price_min <= ?)');
+      params.push(max);
+    }
+  }
+  if (source) {
+    where.push('EXISTS (SELECT 1 FROM source_events se WHERE se.event_id = events.id AND se.source = ?)');
+    params.push(source);
   }
 
   where.push('events.id NOT IN (SELECT event_id FROM user_hidden_events WHERE user_id = ?)');

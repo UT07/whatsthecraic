@@ -39,7 +39,7 @@ const DJs = () => {
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchDJs(); }, []);
+  useEffect(() => { fetchDJs(); loadPerformers(); }, []);
 
   const runSearch = async () => {
     setSearching(true);

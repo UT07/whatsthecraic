@@ -11,6 +11,7 @@ import Organizer from './pages/Organizer';
 import Preferences from './pages/Preferences';
 import Login from './pages/Auth/Login';
 import Signup from './pages/Auth/Signup';
+import ForgotPassword from './pages/Auth/ForgotPassword';
 import { getToken } from './services/apiClient';
 
 const getCurrentUser = () => getToken();
@@ -43,6 +44,7 @@ const App = () => {
           <Routes>
             <Route path="/auth/login" element={<Login setIsAuthenticated={setIsAuthenticated} />} />
             <Route path="/auth/signup" element={<Signup />} />
+            <Route path="/auth/forgot-password" element={<ForgotPassword />} />
             {isAuthenticated ? (
               <>
                 <Route path="/dashboard" element={<Dashboard />} />

@@ -739,6 +739,27 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+// Password reset endpoint
+app.post('/auth/reset-password', async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    if (!email || !newPassword) {
+      return sendError(res, 400, 'missing_fields', 'Email and new password are required');
+    }
+    const [users] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
+    if (users.length === 0) {
+      return sendError(res, 404, 'user_not_found', 'No account found with that email');
+    }
+    const bcrypt = require('bcryptjs');
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await pool.execute('UPDATE users SET password_hash = ? WHERE email = ?', [hashed, email]);
+    return res.status(200).json({ success: true, message: 'Password has been reset successfully' });
+  } catch (err) {
+    console.error('Password reset error:', err);
+    return sendError(res, 500, 'internal_error', 'Failed to reset password');
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   return sendError(res, 500, 'internal_error', 'Server error');

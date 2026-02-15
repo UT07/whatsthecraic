@@ -28,6 +28,10 @@ const authAPI = {
   savePreferences: async (payload) => {
     const response = await authClient.post('/auth/preferences', payload);
     return response.data;
+  },
+  resetPassword: async (payload) => {
+    const response = await authClient.post('/auth/reset-password', payload);
+    return response.data;
   }
 };
 
