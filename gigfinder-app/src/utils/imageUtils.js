@@ -116,11 +116,9 @@ export const fetchSpotifyArtistImage = async (artistName) => {
   if (cached) return cached;
 
   try {
-    // Use Spotify Web API search endpoint
-    // Note: This requires a backend proxy or Spotify access token
-    // For now, we'll use a fallback approach via our backend
+    // Use backend /v1/performers endpoint with Spotify filter
     const response = await fetch(
-      `${process.env.REACT_APP_API_BASE || 'https://api.whatsthecraic.run.place'}/performers/search?q=${encodeURIComponent(artistName)}&source=spotify&limit=1`
+      `${process.env.REACT_APP_API_BASE || 'https://api.whatsthecraic.run.place'}/v1/performers?q=${encodeURIComponent(artistName)}&include=spotify&limit=1`
     );
 
     if (!response.ok) return null;

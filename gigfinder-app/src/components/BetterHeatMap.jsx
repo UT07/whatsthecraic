@@ -5,19 +5,19 @@ import 'react-vis/dist/style.css';
 
 const BetterHeatMap = ({ data, xLabels, width = 600, height = 150 }) => {
   // Ensure data and xLabels are defined and have the same length
-  if (!data || !xLabels || data.length !== xLabels.length) {
-    return <div>Invalid heat map data.</div>;
+  if (!data || !Array.isArray(data) || !xLabels || !Array.isArray(xLabels) || data.length !== xLabels.length || data.length === 0) {
+    return null;
   }
-  
+
   // Convert one-row data into an array of objects for the heatmap:
   const cells = xLabels.map((label, index) => ({
     x: label,
     y: 0, // single row
-    value: data[index],
+    value: data[index] || 0,
   }));
-  
-  // Determine the maximum value for color scaling
-  const maxVal = Math.max(...data);
+
+  // Determine the maximum value for color scaling (protect against empty data)
+  const maxVal = data.length > 0 ? Math.max(...data.map(v => v || 0)) : 1;
 
   return (
     <XYPlot
