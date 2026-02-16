@@ -205,6 +205,84 @@ const DJs = () => {
     );
   };
 
+  // Performer card component (separate to use hooks properly)
+  const PerformerCard = ({ performer, index }) => {
+    const [showMixcloud, setShowMixcloud] = useState(false);
+
+    return (
+      <motion.div
+        key={`${performer.name}-${index}`}
+        className="card-artist"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: index * 0.02 }}
+      >
+        <div className="card-artist-img-wrap" style={{ paddingTop: '100%' }}>
+          {performer.image ? (
+            <img src={performer.image} alt={performer.name} className="card-artist-img" loading="lazy" />
+          ) : (
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: `linear-gradient(135deg, hsl(${(index * 43) % 360}, 35%, 16%), hsl(${(index * 89) % 360}, 20%, 10%))`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              <span style={{ fontSize: '3rem', fontWeight: 800, color: 'rgba(255,255,255,0.12)' }}>
+                {(performer.name || '?')[0].toUpperCase()}
+              </span>
+            </div>
+          )}
+          <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
+            <span className={`badge ${performer.source === 'spotify' ? '' : performer.source === 'mixcloud' ? '' : 'badge-sky'}`}
+              style={{ fontSize: '0.6rem',
+                ...(performer.source === 'spotify' ? { background: 'rgba(29,185,84,0.2)', color: '#1DB954' } : {}),
+                ...(performer.source === 'mixcloud' ? { background: 'rgba(82,177,252,0.2)', color: '#52B1FC' } : {})
+              }}>
+              {performer.source}
+            </span>
+          </div>
+        </div>
+        <div className="card-artist-body">
+          <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.3rem' }}>
+            {performer.name}
+          </h3>
+          {performer.genres && (
+            <p className="line-clamp-2" style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem', minHeight: '2.4rem' }}>
+              {Array.isArray(performer.genres) ? performer.genres.slice(0, 3).join(', ') : performer.genres}
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+            {(performer.spotifyUrl || performer.source === 'spotify') && (
+              <a href={performer.spotifyUrl} target="_blank" rel="noopener noreferrer"
+                className="chip" style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(29,185,84,0.15)', borderColor: '#1DB954', color: '#1DB954', textDecoration: 'none' }}>
+                Spotify ↗
+              </a>
+            )}
+            {(performer.mixcloudUrl || performer.source === 'mixcloud') && (
+              <>
+                <a href={performer.mixcloudUrl} target="_blank" rel="noopener noreferrer"
+                  className="chip" style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(82,177,252,0.15)', borderColor: '#52B1FC', color: '#52B1FC', textDecoration: 'none' }}>
+                  Mixcloud ↗
+                </a>
+                <button
+                  onClick={() => setShowMixcloud(!showMixcloud)}
+                  className="chip"
+                  style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', cursor: 'pointer', background: showMixcloud ? 'rgba(82,177,252,0.2)' : '', borderColor: showMixcloud ? '#52B1FC' : '' }}
+                >
+                  {showMixcloud ? 'Hide' : 'Play'}
+                </button>
+              </>
+            )}
+          </div>
+          {showMixcloud && (
+            <div style={{ marginTop: '0.5rem' }}>
+              <MixcloudPlayer artistName={performer.name} height={80} />
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -302,82 +380,9 @@ const DJs = () => {
             </div>
           ) : (
             <div className="grid-events" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
-              {performers.map((performer, index) => {
-                const [showMixcloud, setShowMixcloud] = useState(false);
-
-                return (
-                  <motion.div
-                    key={`${performer.name}-${index}`}
-                    className="card-artist"
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: index * 0.02 }}
-                  >
-                    <div className="card-artist-img-wrap" style={{ paddingTop: '100%' }}>
-                      {performer.image ? (
-                        <img src={performer.image} alt={performer.name} className="card-artist-img" loading="lazy" />
-                      ) : (
-                        <div style={{
-                          position: 'absolute', inset: 0,
-                          background: `linear-gradient(135deg, hsl(${(index * 43) % 360}, 35%, 16%), hsl(${(index * 89) % 360}, 20%, 10%))`,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center'
-                        }}>
-                          <span style={{ fontSize: '3rem', fontWeight: 800, color: 'rgba(255,255,255,0.12)' }}>
-                            {(performer.name || '?')[0].toUpperCase()}
-                          </span>
-                        </div>
-                      )}
-                      <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
-                        <span className={`badge ${performer.source === 'spotify' ? '' : performer.source === 'mixcloud' ? '' : 'badge-sky'}`}
-                          style={{ fontSize: '0.6rem',
-                            ...(performer.source === 'spotify' ? { background: 'rgba(29,185,84,0.2)', color: '#1DB954' } : {}),
-                            ...(performer.source === 'mixcloud' ? { background: 'rgba(82,177,252,0.2)', color: '#52B1FC' } : {})
-                          }}>
-                          {performer.source}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="card-artist-body">
-                      <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.3rem' }}>
-                        {performer.name}
-                      </h3>
-                      {performer.genres && (
-                        <p className="line-clamp-2" style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem', minHeight: '2.4rem' }}>
-                          {Array.isArray(performer.genres) ? performer.genres.slice(0, 3).join(', ') : performer.genres}
-                        </p>
-                      )}
-                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                        {(performer.spotifyUrl || performer.source === 'spotify') && (
-                          <a href={performer.spotifyUrl} target="_blank" rel="noopener noreferrer"
-                            className="chip" style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(29,185,84,0.15)', borderColor: '#1DB954', color: '#1DB954', textDecoration: 'none' }}>
-                            Spotify ↗
-                          </a>
-                        )}
-                        {(performer.mixcloudUrl || performer.source === 'mixcloud') && (
-                          <>
-                            <a href={performer.mixcloudUrl} target="_blank" rel="noopener noreferrer"
-                              className="chip" style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(82,177,252,0.15)', borderColor: '#52B1FC', color: '#52B1FC', textDecoration: 'none' }}>
-                              Mixcloud ↗
-                            </a>
-                            <button
-                              onClick={() => setShowMixcloud(!showMixcloud)}
-                              className="chip"
-                              style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', cursor: 'pointer', background: showMixcloud ? 'rgba(82,177,252,0.2)' : '', borderColor: showMixcloud ? '#52B1FC' : '' }}
-                            >
-                              {showMixcloud ? 'Hide' : 'Play'}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                      {showMixcloud && (
-                        <div style={{ marginTop: '0.5rem' }}>
-                          <MixcloudPlayer artistName={performer.name} height={80} />
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                );
-              })}
+              {performers.map((performer, index) => (
+                <PerformerCard key={`${performer.name}-${index}`} performer={performer} index={index} />
+              ))}
             </div>
           )}
         </section>
