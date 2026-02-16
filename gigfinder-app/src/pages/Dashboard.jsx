@@ -396,6 +396,49 @@ const Dashboard = () => {
     .filter(e => new Date(e.start_time) > new Date())
     .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
 
+  // Premium ML sections
+  // 1. Highest-scored event for hero
+  const topScoredEvent = feedEvents.length > 0
+    ? feedEvents.reduce((best, curr) => (curr.rank_score || 0) > (best.rank_score || 0) ? curr : best, feedEvents[0])
+    : eventsWithImages[0] || events[0];
+
+  // 2. This Weekend events (Friday-Sunday)
+  const now = new Date();
+  const thisWeekend = [...events]
+    .filter(e => {
+      const eventDate = new Date(e.start_time);
+      if (eventDate < now) return false;
+      const dayOfWeek = eventDate.getDay();
+      const daysUntilFriday = (5 - now.getDay() + 7) % 7;
+      const thisFriday = new Date(now);
+      thisFriday.setDate(now.getDate() + daysUntilFriday);
+      thisFriday.setHours(0, 0, 0, 0);
+      const thisSunday = new Date(thisFriday);
+      thisSunday.setDate(thisFriday.getDate() + 2);
+      thisSunday.setHours(23, 59, 59, 999);
+      return eventDate >= thisFriday && eventDate <= thisSunday;
+    })
+    .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+    .slice(0, 10);
+
+  // 3. Trending Near You (by save count or ML popularity score)
+  const trending = [...events]
+    .filter(e => e.save_count || e.rank_score)
+    .sort((a, b) => (b.save_count || 0) - (a.save_count || 0) || (b.rank_score || 0) - (a.rank_score || 0))
+    .slice(0, 12);
+
+  // 4. By Genre grouping
+  const topUserGenres = spotifyProfile?.top_genres?.slice(0, 3) || [];
+  const eventsByGenre = topUserGenres.map(genreObj => {
+    const genreName = typeof genreObj === 'object' ? genreObj.genre : genreObj;
+    return {
+      genre: genreName,
+      events: events
+        .filter(e => (e.genres || []).some(g => g.toLowerCase().includes(genreName.toLowerCase())))
+        .slice(0, 6)
+    };
+  }).filter(g => g.events.length > 0);
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -411,12 +454,156 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-10">
-      {/* ─── HERO GRID ─── */}
-      <section className="grid-hero animate-fade-up">
-        <HeroBanner event={heroEvents[0]} />
-        <SmallHeroCard event={heroEvents[1]} />
-        <SmallHeroCard event={heroEvents[2]} />
-      </section>
+      {/* ─── PREMIUM HERO: HIGHEST ML MATCH ─── */}
+      {topScoredEvent && (
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          style={{ position: 'relative', borderRadius: 20, overflow: 'hidden', minHeight: 500 }}
+        >
+          {getBestImage(topScoredEvent.images, 'hero', 1400) ? (
+            <img
+              src={getBestImage(topScoredEvent.images, 'hero', 1400)}
+              alt={topScoredEvent.title}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover'
+              }}
+            />
+          ) : (
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, #1a1a1a, #0a0a0a)' }} />
+          )}
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.85) 100%)'
+          }} />
+          <div style={{
+            position: 'relative',
+            zIndex: 2,
+            padding: 'clamp(2rem, 5vw, 3.5rem)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'flex-end',
+            minHeight: 500
+          }}>
+            {topScoredEvent.rank_score && topScoredEvent.rank_score > 0.7 && (
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: 0.2, duration: 0.4 }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem 1rem',
+                  borderRadius: 12,
+                  background: 'rgba(0, 214, 125, 0.2)',
+                  backdropFilter: 'blur(12px)',
+                  border: '1.5px solid #00d67d',
+                  color: '#00d67d',
+                  fontSize: '0.85rem',
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  width: 'fit-content',
+                  marginBottom: '1rem'
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/>
+                </svg>
+                {Math.round(topScoredEvent.rank_score * 100)}% Match
+              </motion.div>
+            )}
+            <motion.h1
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.3, duration: 0.5 }}
+              style={{
+                fontSize: 'clamp(1.8rem, 5vw, 3.5rem)',
+                fontWeight: 900,
+                letterSpacing: '-0.04em',
+                lineHeight: 1.1,
+                marginBottom: '1rem',
+                textShadow: '0 2px 20px rgba(0,0,0,0.5)'
+              }}
+            >
+              {topScoredEvent.title}
+            </motion.h1>
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.4, duration: 0.5 }}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'center', marginBottom: '1.5rem' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                  <polyline points="9,22 9,12 15,12 15,22"/>
+                </svg>
+                <span style={{ fontSize: '1rem', fontWeight: 600 }}>{topScoredEvent.venue_name || 'Venue TBA'}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#00d67d' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/>
+                  <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                <span style={{ fontSize: '1rem', fontWeight: 700 }}>
+                  {formatDate(topScoredEvent.start_time)} {formatTime(topScoredEvent.start_time) && `\u00B7 ${formatTime(topScoredEvent.start_time)}`}
+                </span>
+              </div>
+            </motion.div>
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.5, duration: 0.5 }}
+              style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}
+            >
+              {topScoredEvent.ticket_url && (
+                <a
+                  href={topScoredEvent.ticket_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-primary"
+                  style={{
+                    padding: '0.85rem 2rem',
+                    fontSize: '1rem',
+                    fontWeight: 700,
+                    borderRadius: 12,
+                    background: '#00d67d',
+                    color: '#000'
+                  }}
+                >
+                  Get Tickets
+                </a>
+              )}
+              {token && (
+                <button
+                  onClick={() => handleSave(topScoredEvent.id)}
+                  className="btn btn-outline"
+                  style={{
+                    padding: '0.85rem 1.5rem',
+                    fontSize: '1rem',
+                    fontWeight: 700,
+                    borderRadius: 12,
+                    borderColor: 'rgba(255,255,255,0.3)',
+                    color: '#fff'
+                  }}
+                >
+                  {savedIds.has(topScoredEvent.id) ? '\u2764\uFE0F Saved' : '\u2661 Save'}
+                </button>
+              )}
+            </motion.div>
+          </div>
+        </motion.section>
+      )}
 
       {/* ─── SPOTIFY CTA (not linked) ─── */}
       {token && !spotifyStatus?.linked && (
@@ -446,6 +633,181 @@ const Dashboard = () => {
       {token && spotifyStatus?.linked && (
         <TasteProfilePanel />
       )}
+
+      {/* ─── THIS WEEKEND CAROUSEL ─── */}
+      {thisWeekend.length > 0 && (
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <div className="section-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <h2 className="section-header-title">This weekend</h2>
+              <span className="badge" style={{ fontSize: '0.6rem', background: 'rgba(255, 215, 0, 0.15)', color: '#ffd700' }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/>
+                  <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                Fri-Sun
+              </span>
+            </div>
+          </div>
+          <div className="scroll-row" style={{ gap: '1rem' }}>
+            {thisWeekend.map((event, i) => {
+              const img = getBestImage(event.images, 'card', 500);
+              return (
+                <motion.div
+                  key={event.id || i}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className="card-event"
+                  style={{ width: 280, flexShrink: 0 }}
+                >
+                  <div className="card-event-img-wrap" style={{ paddingTop: '75%', cursor: 'pointer' }} onClick={() => handleCardClick(event)}>
+                    {img ? (
+                      <img src={img} alt={event.title} className="card-event-img" loading="lazy" />
+                    ) : (
+                      <div className="card-event-img-placeholder">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--muted-2)' }}>
+                          <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                        </svg>
+                      </div>
+                    )}
+                    <div className="card-event-overlay" style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.8) 100%)' }}>
+                      <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10 }}>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#ffd700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>
+                          {formatDate(event.start_time)}
+                        </div>
+                        {formatTime(event.start_time) && (
+                          <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)' }}>
+                            {formatTime(event.start_time)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="card-event-body">
+                    <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: '0.4rem' }}>
+                      {event.title}
+                    </h3>
+                    <div className="venue-strip">
+                      <div className="venue-strip-dot" />
+                      <span className="venue-strip-name">{event.venue_name || 'Venue TBA'}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
+                      {(event.genres || []).slice(0, 2).map(g => (
+                        <span key={g} className="chip" style={{ fontSize: '0.68rem', padding: '0.2rem 0.5rem' }}>{g}</span>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        </motion.section>
+      )}
+
+      {/* ─── TRENDING NEAR YOU ─── */}
+      {trending.length > 0 && (
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <div className="section-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <h2 className="section-header-title">Trending near you</h2>
+              <span className="badge" style={{ fontSize: '0.6rem', background: 'rgba(255, 107, 107, 0.15)', color: '#ff6b6b' }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>
+                Hot
+              </span>
+            </div>
+            <Link to="/discover" className="section-header-link">See all &rarr;</Link>
+          </div>
+          <div className="grid-events">
+            {trending.slice(0, 6).map((event, i) => (
+              <EventCard
+                key={event.id || i}
+                event={event}
+                index={i}
+                saved={savedIds.has(event.id)}
+                onSave={handleSave}
+                onCardClick={handleCardClick}
+                onExplain={handleExplain}
+                showFeedback={token && (event.rank_reasons || event.rank_score)}
+              />
+            ))}
+          </div>
+        </motion.section>
+      )}
+
+      {/* ─── BECAUSE YOU LIKE [GENRE] ─── */}
+      {token && eventsByGenre.length > 0 && eventsByGenre.map((genreGroup, idx) => (
+        <motion.section
+          key={genreGroup.genre}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 * idx }}
+        >
+          <div className="section-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <h2 className="section-header-title">Because you like {genreGroup.genre}</h2>
+              <span className="badge" style={{ fontSize: '0.6rem', background: 'rgba(138, 43, 226, 0.15)', color: '#8a2be2' }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/>
+                </svg>
+                Your Taste
+              </span>
+            </div>
+          </div>
+          <div className="scroll-row">
+            {genreGroup.events.map((event, i) => {
+              const img = getBestImage(event.images, 'card', 400);
+              return (
+                <motion.div
+                  key={event.id || i}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className="card-event"
+                  style={{ width: 220, flexShrink: 0 }}
+                >
+                  <div className="card-event-img-wrap" style={{ paddingTop: '100%', cursor: 'pointer' }} onClick={() => handleCardClick(event)}>
+                    {img ? (
+                      <img src={img} alt={event.title} className="card-event-img" loading="lazy" />
+                    ) : (
+                      <div className="card-event-img-placeholder">
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--muted-2)' }}>
+                          <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                  <div className="card-event-body">
+                    <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
+                    <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.88rem', lineHeight: 1.3, marginBottom: '0.3rem', marginTop: event.rank_reasons ? '0.3rem' : 0 }}>
+                      {event.title}
+                    </h3>
+                    <div className="venue-strip">
+                      <div className="venue-strip-dot" />
+                      <span className="venue-strip-name">{event.venue_name || 'TBA'}</span>
+                    </div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--emerald)', fontWeight: 600, display: 'block', marginTop: '0.3rem' }}>
+                      {formatDate(event.start_time)}
+                    </span>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        </motion.section>
+      ))}
 
       {/* ─── FANS LIKE YOU ALSO SAVED (ML Collaborative Filtering) ─── */}
       {token && mlRecommendations.length > 0 && (

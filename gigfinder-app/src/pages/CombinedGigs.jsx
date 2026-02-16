@@ -154,9 +154,9 @@ const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
 const CombinedGigs = () => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState('feed');
-  const [savedIds, setSavedIds] = useState(new Set());
   const token = getToken();
+  const [mode, setMode] = useState(token ? 'feed' : 'search');
+  const [savedIds, setSavedIds] = useState(new Set());
   const [alerts, setAlerts] = useState([]);
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [alertForm, setAlertForm] = useState({ artist_name: '', city: '' });
@@ -199,7 +199,10 @@ const CombinedGigs = () => {
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (mode === 'feed') loadFeed(); }, [mode]);
+  useEffect(() => {
+    if (mode === 'feed') loadFeed();
+    else if (mode === 'search') runSearch();
+  }, [mode]);
 
   useEffect(() => {
     if (!token) return;
