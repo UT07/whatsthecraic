@@ -5,8 +5,10 @@ import eventsAPI from '../services/eventsAPI';
 import djAPI from '../services/djAPI';
 import venueAPI from '../services/venueAPI';
 import authAPI from '../services/authAPI';
+import mlAPI from '../services/mlAPI';
 import { getToken } from '../services/apiClient';
 import { getBestImage } from '../utils/imageUtils';
+import { ExplainabilityModal, TasteProfilePanel, FeedbackButtons, EventDensityHeatMap } from '../components/ml';
 
 const formatDate = (iso) => {
   if (!iso) return 'TBA';
@@ -62,8 +64,15 @@ const MatchBadge = ({ reasons, score }) => {
   );
 };
 
-const EventCard = ({ event, index, saved, onSave }) => {
+const EventCard = ({ event, index, saved, onSave, onExplain, onCardClick, showFeedback = false }) => {
   const image = getBestImage(event.images, 'card', 400);
+
+  const handleCardClick = () => {
+    if (onCardClick) {
+      onCardClick(event);
+    }
+  };
+
   return (
     <motion.div
       className="card-event"
@@ -71,7 +80,7 @@ const EventCard = ({ event, index, saved, onSave }) => {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: index * 0.04 }}
     >
-      <div className="card-event-img-wrap">
+      <div className="card-event-img-wrap" onClick={handleCardClick} style={{ cursor: onCardClick ? 'pointer' : 'default' }}>
         {image ? (
           <img src={image} alt={event.title} className="card-event-img" loading="lazy" />
         ) : (
@@ -89,7 +98,24 @@ const EventCard = ({ event, index, saved, onSave }) => {
       </div>
       <div className="card-event-body">
         {/* ML match reason */}
-        <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+          <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
+          {onExplain && (event.rank_reasons || event.rank_score) && (
+            <button
+              onClick={() => onExplain(event)}
+              className="btn btn-ghost"
+              style={{
+                fontSize: '0.65rem',
+                padding: '0.2rem 0.5rem',
+                minWidth: 'auto',
+                opacity: 0.7
+              }}
+              title="Why this event?"
+            >
+              ?
+            </button>
+          )}
+        </div>
         <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: '0.35rem', marginTop: event.rank_reasons || event.rank_score ? '0.35rem' : 0 }}>
           {event.title}
         </h3>
@@ -103,7 +129,14 @@ const EventCard = ({ event, index, saved, onSave }) => {
               <span key={g} className="chip" style={{ fontSize: '0.68rem', padding: '0.2rem 0.5rem' }}>{g}</span>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: '0.35rem' }}>
+          <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+            {showFeedback && (
+              <FeedbackButtons
+                eventId={event.id}
+                size="sm"
+                context={{ page: 'dashboard', position: index }}
+              />
+            )}
             {event.ticket_url && (
               <a href={event.ticket_url} target="_blank" rel="noreferrer"
                 className="btn btn-sm btn-primary" style={{ fontSize: '0.72rem', padding: '0.3rem 0.65rem' }}>
@@ -221,8 +254,8 @@ const SpotifyProfileWidget = ({ profile, status, onSync }) => {
           </div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             {topGenres.map(g => (
-              <span key={g} className="chip chip-active" style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem' }}>
-                {g}
+              <span key={typeof g === 'object' ? g.genre : g} className="chip chip-active" style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem' }}>
+                {typeof g === 'object' ? g.genre : g}
               </span>
             ))}
           </div>
@@ -254,6 +287,7 @@ const SpotifyProfileWidget = ({ profile, status, onSync }) => {
 const Dashboard = () => {
   const [events, setEvents] = useState([]);
   const [feedEvents, setFeedEvents] = useState([]);
+  const [mlRecommendations, setMlRecommendations] = useState([]);
   const [djs, setDjs] = useState([]);
   const [venues, setVenues] = useState([]);
   const [spotifyStatus, setSpotifyStatus] = useState(null);
@@ -261,6 +295,8 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [activeGenre, setActiveGenre] = useState('All');
   const [savedIds, setSavedIds] = useState(new Set());
+  const [explainModalOpen, setExplainModalOpen] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState(null);
 
   const token = getToken();
   const authBase = process.env.REACT_APP_AUTH_BASE || 'https://auth.whatsthecraic.run.place';
@@ -274,13 +310,20 @@ const Dashboard = () => {
           djAPI.getAllDJs(),
           venueAPI.getAllVenues()
         ];
-        if (token) requests.push(eventsAPI.getFeed({ limit: 20 }));
+        if (token) {
+          requests.push(eventsAPI.getFeed({ limit: 20 }));
+          // Get ML recommendations (collaborative filtering)
+          requests.push(mlAPI.getRecommendations({ limit: 12 }));
+        }
 
         const results = await Promise.all(requests);
         setEvents(results[0].events || []);
         setDjs(Array.isArray(results[1]) ? results[1] : []);
         setVenues(Array.isArray(results[2]) ? results[2] : []);
         if (results[3]) setFeedEvents(results[3].events || []);
+        if (results[4]?.recommendations) {
+          setMlRecommendations(results[4].recommendations);
+        }
       } catch (error) {
         console.error('Dashboard load error:', error);
       } finally {
@@ -304,7 +347,27 @@ const Dashboard = () => {
     try {
       await eventsAPI.saveEvent(id);
       setSavedIds(prev => new Set([...prev, id]));
+      // Send feedback to ML service
+      mlAPI.sendFeedback({
+        eventId: id,
+        action: 'save',
+        context: { page: 'dashboard' }
+      }).catch(() => {}); // Silent fail
     } catch (e) { console.error('Save failed:', e); }
+  };
+
+  const handleCardClick = (event) => {
+    // Track click event for ML
+    mlAPI.sendFeedback({
+      eventId: event.id,
+      action: 'click',
+      context: { page: 'dashboard', event_title: event.title }
+    }).catch(() => {}); // Silent fail
+  };
+
+  const handleExplain = (event) => {
+    setSelectedEvent(event);
+    setExplainModalOpen(true);
   };
 
   const handleSyncSpotify = () => {
@@ -377,6 +440,95 @@ const Dashboard = () => {
       {/* ─── SPOTIFY PROFILE (linked) ─── */}
       {token && spotifyStatus?.linked && (
         <SpotifyProfileWidget profile={spotifyProfile} status={spotifyStatus} onSync={handleSyncSpotify} />
+      )}
+
+      {/* ─── TASTE PROFILE PANEL ─── */}
+      {token && spotifyStatus?.linked && (
+        <TasteProfilePanel />
+      )}
+
+      {/* ─── FANS LIKE YOU ALSO SAVED (ML Collaborative Filtering) ─── */}
+      {token && mlRecommendations.length > 0 && (
+        <section>
+          <div className="section-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <h2 className="section-header-title">Fans like you also saved</h2>
+              <span className="badge" style={{ fontSize: '0.6rem', background: '#4fc3f722', color: '#4fc3f7' }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
+                ML Picks
+              </span>
+            </div>
+            <Link to="/discover" className="section-header-link">See all &rarr;</Link>
+          </div>
+          <div className="scroll-row">
+            {mlRecommendations.map((event, i) => {
+              const img = getBestImage(event.images, 'card', 400);
+              return (
+                <div key={event.id || i} className="card-event" style={{ width: 220, flexShrink: 0 }}>
+                  <div className="card-event-img-wrap" style={{ paddingTop: '100%', cursor: 'pointer' }} onClick={() => handleCardClick(event)}>
+                    {img ? (
+                      <img src={img} alt={event.title} className="card-event-img" loading="lazy" />
+                    ) : (
+                      <div className="card-event-img-placeholder">
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--muted-2)' }}>
+                          <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                        </svg>
+                      </div>
+                    )}
+                    {/* Match score indicator */}
+                    {event.rank_score > 0 && (
+                      <div style={{
+                        position: 'absolute', top: 8, right: 8, zIndex: 3,
+                        width: 32, height: 32, borderRadius: 8,
+                        background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: event.rank_score > 0.7 ? 'var(--emerald)' : event.rank_score > 0.4 ? 'var(--gold)' : 'var(--muted)',
+                        fontSize: '0.65rem', fontWeight: 800
+                      }}>
+                        {Math.round(event.rank_score * 100)}%
+                      </div>
+                    )}
+                  </div>
+                  <div className="card-event-body">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                      <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
+                      {(event.rank_reasons || event.rank_score) && (
+                        <button
+                          onClick={() => handleExplain(event)}
+                          className="btn btn-ghost"
+                          style={{
+                            fontSize: '0.65rem',
+                            padding: '0.2rem 0.5rem',
+                            minWidth: 'auto',
+                            opacity: 0.7
+                          }}
+                          title="Why this event?"
+                        >
+                          ?
+                        </button>
+                      )}
+                    </div>
+                    <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.88rem', lineHeight: 1.3, marginBottom: '0.3rem', marginTop: event.rank_reasons ? '0.3rem' : 0 }}>{event.title}</h3>
+                    <div className="venue-strip">
+                      <div className="venue-strip-dot" />
+                      <span className="venue-strip-name">{event.venue_name || 'TBA'}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--emerald)', fontWeight: 600 }}>
+                        {formatDate(event.start_time)}
+                      </span>
+                      <FeedbackButtons
+                        eventId={event.id}
+                        size="sm"
+                        context={{ page: 'dashboard', section: 'ml_recommendations', position: i }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {/* ─── FOR YOU (Personalized with ML) ─── */}
@@ -483,6 +635,9 @@ const Dashboard = () => {
         )}
       </section>
 
+      {/* ─── EVENT DENSITY HEATMAP ─── */}
+      <EventDensityHeatMap />
+
       {/* ─── BROWSE BY GENRE ─── */}
       <section>
         <div className="section-header">
@@ -510,7 +665,16 @@ const Dashboard = () => {
             className="grid-events"
           >
             {filteredEvents.slice(0, 12).map((event, i) => (
-              <EventCard key={event.id || i} event={event} index={i} saved={savedIds.has(event.id)} onSave={handleSave} />
+              <EventCard
+                key={event.id || i}
+                event={event}
+                index={i}
+                saved={savedIds.has(event.id)}
+                onSave={handleSave}
+                onCardClick={handleCardClick}
+                onExplain={handleExplain}
+                showFeedback={token && (event.rank_reasons || event.rank_score)}
+              />
             ))}
           </motion.div>
         </AnimatePresence>
@@ -633,6 +797,13 @@ const Dashboard = () => {
           Explore events
         </Link>
       </section>
+
+      {/* ─── EXPLAINABILITY MODAL ─── */}
+      <ExplainabilityModal
+        isOpen={explainModalOpen}
+        onClose={() => setExplainModalOpen(false)}
+        event={selectedEvent}
+      />
     </div>
   );
 };
