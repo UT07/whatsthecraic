@@ -59,6 +59,40 @@ export const getImageSrcSet = (images) => {
     .join(', ');
 };
 
+// Request queue to prevent rate limiting
+const requestQueue = {
+  queue: [],
+  processing: false,
+  delay: 300, // 300ms between requests
+
+  add(fn) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ fn, resolve, reject });
+      this.process();
+    });
+  },
+
+  async process() {
+    if (this.processing || this.queue.length === 0) return;
+
+    this.processing = true;
+    const { fn, resolve, reject } = this.queue.shift();
+
+    try {
+      const result = await fn();
+      resolve(result);
+    } catch (error) {
+      reject(error);
+    }
+
+    // Wait before processing next request
+    setTimeout(() => {
+      this.processing = false;
+      this.process();
+    }, this.delay);
+  }
+};
+
 /**
  * Image cache strategy - sessionStorage with 24hr TTL
  * @param {string} key - Cache key
@@ -115,26 +149,34 @@ export const fetchSpotifyArtistImage = async (artistName) => {
   const cached = imageCacheStrategy(cacheKey);
   if (cached) return cached;
 
-  try {
-    // Use backend /v1/performers endpoint with Spotify filter
-    const response = await fetch(
-      `${process.env.REACT_APP_API_BASE || 'https://api.whatsthecraic.run.place'}/v1/performers?q=${encodeURIComponent(artistName)}&include=spotify&limit=1`
-    );
+  // Add to queue to prevent rate limiting
+  return requestQueue.add(async () => {
+    try {
+      // Use backend /v1/performers endpoint with Spotify filter
+      const response = await fetch(
+        `${process.env.REACT_APP_API_BASE || 'https://api.whatsthecraic.run.place'}/v1/performers?q=${encodeURIComponent(artistName)}&include=spotify&limit=1`
+      );
 
-    if (!response.ok) return null;
+      if (!response.ok) {
+        if (response.status === 429) {
+          console.warn('Rate limited on Spotify search for:', artistName);
+        }
+        return null;
+      }
 
-    const data = await response.json();
-    const imageUrl = data.performers?.[0]?.image || null;
+      const data = await response.json();
+      const imageUrl = data.performers?.[0]?.image || null;
 
     if (imageUrl) {
       imageCacheStrategy(cacheKey, imageUrl);
     }
 
-    return imageUrl;
-  } catch (error) {
-    console.warn('Failed to fetch Spotify image for:', artistName, error);
-    return null;
-  }
+      return imageUrl;
+    } catch (error) {
+      console.warn('Failed to fetch Spotify image for:', artistName, error);
+      return null;
+    }
+  });
 };
 
 /**
