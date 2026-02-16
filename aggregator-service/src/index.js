@@ -179,6 +179,13 @@ app.post('/v1/auth/preferences', (req, res) => proxyRequest(req, res, { url: `${
 app.get('/v1/ml/health', (req, res) => proxyRequest(req, res, { url: `${ML_SERVICE_URL}/health` }));
 app.get('/v1/ml/recommendations/:userId', (req, res) => proxyRequest(req, res, { url: `${ML_SERVICE_URL}/recommendations/${req.params.userId}` }));
 
+// ML service proxy - Critical endpoints for frontend integration
+app.post('/v1/recommendations', (req, res) => proxyRequest(req, res, { url: `${ML_SERVICE_URL}/v1/recommendations`, method: 'post' }));
+app.post('/v1/feedback', (req, res) => proxyRequest(req, res, { url: `${ML_SERVICE_URL}/v1/feedback`, method: 'post' }));
+app.get('/v1/model/info', (req, res) => proxyRequest(req, res, { url: `${ML_SERVICE_URL}/v1/model/info` }));
+app.get('/v1/experiments', (req, res) => proxyRequest(req, res, { url: `${ML_SERVICE_URL}/v1/experiments` }));
+app.get('/v1/experiments/:experimentId/results', (req, res) => proxyRequest(req, res, { url: `${ML_SERVICE_URL}/v1/experiments/${req.params.experimentId}/results` }));
+
 app.get('/v1/events/search', async (req, res) => {
   try {
     const response = await http.get(
