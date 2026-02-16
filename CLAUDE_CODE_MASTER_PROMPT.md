@@ -49,7 +49,7 @@ The goal is to make this a **world-class, professional event management website*
 
 ### GitHub
 - Repo: `UT07/whatsthecraic`
-- PAT: `REDACTED_GITHUB_PAT`
+- PAT: `<redacted>` (stored in GitHub secrets)
 - CI/CD: `.github/workflows/deploy.yml` uses SSM RunShellScript
 
 ### Credentials (in k8s secrets)
