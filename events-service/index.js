@@ -1333,7 +1333,7 @@ app.get('/v1/performers', async (req, res) => {
   } = parsed.data;
 
   const includeSet = new Set(
-    (include ? include.split(',') : ['local', 'ticketmaster', 'mixcloud'])
+    (include ? include.split(',') : ['local', 'ticketmaster', 'spotify', 'mixcloud'])
       .map(item => normalizeToken(item))
       .filter(Boolean)
   );
