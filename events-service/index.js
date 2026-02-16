@@ -1396,9 +1396,21 @@ app.get('/v1/performers', async (req, res) => {
       attractions.forEach(attraction => {
         const name = attraction?.name;
         if (!name) return;
+
+        // Extract images from Ticketmaster attraction
+        const images = (attraction?.images || []).map(img => ({
+          url: img.url,
+          ratio: img.ratio,
+          width: img.width,
+          height: img.height,
+          fallback: img.fallback || false
+        }));
+
         performers.push({
           name,
-          source: 'ticketmaster'
+          source: 'ticketmaster',
+          image: images[0]?.url || null,
+          images: images.length > 0 ? images : null
         });
       });
     });
