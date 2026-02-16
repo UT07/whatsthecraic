@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import venueAPI from '../services/venueAPI';
 import eventsAPI from '../services/eventsAPI';
 import { getUser } from '../services/apiClient';
+import { getBestImage } from '../utils/imageUtils';
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 const fmt = (d) => {
@@ -36,6 +37,99 @@ const getGenreIcon = (genre) => {
   return GENRE_ICONS[key] || GENRE_ICONS.default;
 };
 
+const normalizeToken = (value) => (value ?? '').toString().toLowerCase().trim();
+
+const normalizeVenueKey = (name, city) => {
+  return `${normalizeToken(name)}::${normalizeToken(city)}`;
+};
+
+const uniqueEvents = (events) => {
+  const seen = new Set();
+  const deduped = [];
+  events.forEach((event) => {
+    const key = event.id
+      ? `id:${event.id}`
+      : `${normalizeToken(event.title || event.name)}::${normalizeToken(event.venue_name || event.venue)}::${event.start_time || event.date || ''}`;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    deduped.push(event);
+  });
+  return deduped;
+};
+
+const mergeVenueRecords = (localVenues, events) => {
+  const merged = new Map();
+
+  const upsertVenue = (incoming) => {
+    const city = incoming.city || incoming.address?.split(',').pop()?.trim() || '';
+    const key = normalizeVenueKey(incoming.name, city);
+    if (!incoming.name || !key) return;
+
+    if (!merged.has(key)) {
+      merged.set(key, {
+        id: incoming.id || key,
+        name: incoming.name,
+        address: incoming.address || null,
+        city: city || null,
+        genreFocus: incoming.genreFocus || null,
+        capacity: incoming.capacity || null,
+        notes: incoming.notes || null,
+        image_url: incoming.image_url || null,
+        source_set: new Set(incoming.sources || []),
+        events: uniqueEvents(incoming.events || [])
+      });
+      return;
+    }
+
+    const existing = merged.get(key);
+    if (!existing.address && incoming.address) existing.address = incoming.address;
+    if (!existing.city && city) existing.city = city;
+    if (!existing.genreFocus && incoming.genreFocus) existing.genreFocus = incoming.genreFocus;
+    if (!existing.capacity && incoming.capacity) existing.capacity = incoming.capacity;
+    if (!existing.notes && incoming.notes) existing.notes = incoming.notes;
+    if (!existing.image_url && incoming.image_url) existing.image_url = incoming.image_url;
+    (incoming.sources || []).forEach(source => existing.source_set.add(source));
+    existing.events = uniqueEvents([...(existing.events || []), ...(incoming.events || [])]);
+  };
+
+  (Array.isArray(localVenues) ? localVenues : []).forEach((venue) => {
+    upsertVenue({
+      ...venue,
+      sources: ['local'],
+      events: []
+    });
+  });
+
+  (Array.isArray(events) ? events : []).forEach((event) => {
+    const venueName = event.venue_name || event.venue || null;
+    if (!venueName) return;
+    const image = getBestImage(event.images, 'card', 500) || event.image_url || event.imageUrl || null;
+    const genreFocus = Array.isArray(event.genres) && event.genres.length ? event.genres[0] : null;
+    const eventSources = Array.isArray(event.sources) && event.sources.length
+      ? event.sources.map(s => s.source).filter(Boolean)
+      : [event.source].filter(Boolean);
+
+    upsertVenue({
+      id: `event-${normalizeToken(venueName)}`,
+      name: venueName,
+      city: event.city || null,
+      address: event.city || null,
+      genreFocus,
+      image_url: image,
+      sources: eventSources.length ? eventSources : ['events'],
+      events: [event]
+    });
+  });
+
+  return Array.from(merged.values())
+    .map((venue) => ({
+      ...venue,
+      sources: Array.from(venue.source_set || []),
+      event_count: (venue.events || []).length
+    }))
+    .sort((a, b) => (b.event_count || 0) - (a.event_count || 0) || (a.name || '').localeCompare(b.name || ''));
+};
+
 /* ── Skeleton ────────────────────────────────────────────────────── */
 const VenueSkeleton = () => (
   <div className="card-venue" style={{ minHeight: 280 }}>
@@ -49,7 +143,9 @@ const VenueSkeleton = () => (
 
 /* ── Event mini card (shown inside venue detail) ─────────────────── */
 const VenueEventCard = ({ event, onSave }) => {
-  const img = event.image_url || event.imageUrl;
+  const img = event.image_url || event.imageUrl || getBestImage(event.images, 'thumb', 200);
+  const eventGenre = event.genre || (Array.isArray(event.genres) ? event.genres[0] : null);
+  const eventSource = event.source || (Array.isArray(event.sources) ? event.sources.map(s => s.source).filter(Boolean).join(', ') : null);
   return (
     <div style={{
       display: 'flex', gap: '0.75rem', padding: '0.75rem',
@@ -79,7 +175,7 @@ const VenueEventCard = ({ event, onSave }) => {
       {/* Details */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: '0.78rem', color: 'var(--emerald)', fontWeight: 600, marginBottom: 2 }}>
-          {fmt(event.date || event.start_date)} · {fmtTime(event.date || event.start_date)}
+          {fmt(event.date || event.start_date || event.start_time)} · {fmtTime(event.date || event.start_date || event.start_time)}
         </div>
         <div style={{
           fontSize: '0.92rem', fontWeight: 600, color: 'var(--ink)',
@@ -88,12 +184,12 @@ const VenueEventCard = ({ event, onSave }) => {
           {event.name || event.title}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 4, flexWrap: 'wrap' }}>
-          {event.genre && (
-            <span className="chip" style={{ fontSize: '0.68rem' }}>{event.genre}</span>
+          {eventGenre && (
+            <span className="chip" style={{ fontSize: '0.68rem' }}>{eventGenre}</span>
           )}
-          {(event.source) && (
+          {(eventSource) && (
             <span style={{ fontSize: '0.65rem', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              via {event.source}
+              via {eventSource}
             </span>
           )}
         </div>
@@ -125,9 +221,10 @@ const VenueEventCard = ({ event, onSave }) => {
 /* ── Main Venues Page ────────────────────────────────────────────── */
 const Venues = () => {
   const [venues, setVenues] = useState([]);
+  const [eventsCatalog, setEventsCatalog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [cityFilter, setCityFilter] = useState('');
+  const [cityFilter, setCityFilter] = useState('Dublin');
   const [genreFilter, setGenreFilter] = useState('');
 
   // Venue detail / events panel
@@ -142,25 +239,29 @@ const Venues = () => {
   const fetchVenues = useCallback(async () => {
     setLoading(true);
     try {
-      const hasFilters = search || cityFilter || genreFilter;
-      let data;
-      if (hasFilters) {
-        const filters = {};
-        if (search) filters.q = search;
-        if (cityFilter) filters.city = cityFilter;
-        if (genreFilter) filters.genreFocus = genreFilter;
-        data = await venueAPI.searchVenues(filters);
-        setVenues(data.venues || []);
-      } else {
-        data = await venueAPI.getAllVenues();
-        setVenues(Array.isArray(data) ? data : (data.venues || []));
-      }
+      const requestedCity = cityFilter || 'Dublin';
+      const [localData, eventsData] = await Promise.all([
+        venueAPI.getAllVenues(),
+        eventsAPI.searchEvents({
+          city: requestedCity,
+          q: search || undefined,
+          limit: 500,
+          rank: 'time'
+        })
+      ]);
+
+      const localVenues = Array.isArray(localData) ? localData : (localData.venues || []);
+      const allEvents = Array.isArray(eventsData?.events) ? eventsData.events : [];
+      const merged = mergeVenueRecords(localVenues, allEvents);
+
+      setEventsCatalog(allEvents);
+      setVenues(merged);
     } catch (err) {
       console.error('Error fetching venues:', err);
     } finally {
       setLoading(false);
     }
-  }, [search, cityFilter, genreFilter]);
+  }, [search, cityFilter]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchVenues(); }, []);
@@ -169,10 +270,19 @@ const Venues = () => {
   const openVenueEvents = async (venue) => {
     setSelectedVenue(venue);
     setEventsLoading(true);
-    setVenueEvents([]);
+    const cached = uniqueEvents(venue.events || []);
+    setVenueEvents(cached);
     try {
-      const data = await eventsAPI.searchEvents({ venue: venue.name, limit: 30 });
-      setVenueEvents(data.events || []);
+      const data = await eventsAPI.searchEvents({
+        venue: venue.name,
+        city: venue.city || cityFilter || undefined,
+        limit: 200
+      });
+      const remoteEvents = Array.isArray(data?.events) ? data.events : [];
+      const catalogMatches = eventsCatalog.filter(event =>
+        normalizeToken(event.venue_name).includes(normalizeToken(venue.name))
+      );
+      setVenueEvents(uniqueEvents([...cached, ...catalogMatches, ...remoteEvents]));
     } catch (err) {
       console.error('Error fetching venue events:', err);
     } finally {
@@ -198,10 +308,11 @@ const Venues = () => {
   const genres = [...new Set(venues.map(v => v.genreFocus).filter(Boolean))];
 
   const filteredVenues = venues.filter(v => {
-    const matchSearch = !search || v.name?.toLowerCase().includes(search.toLowerCase()) ||
-      v.address?.toLowerCase().includes(search.toLowerCase());
-    const matchCity = !cityFilter || (v.city || v.address || '').toLowerCase().includes(cityFilter.toLowerCase());
-    const matchGenre = !genreFilter || (v.genreFocus || '').toLowerCase().includes(genreFilter.toLowerCase());
+    const matchSearch = !search
+      || normalizeToken(v.name).includes(normalizeToken(search))
+      || normalizeToken(v.address).includes(normalizeToken(search));
+    const matchCity = !cityFilter || normalizeToken(v.city || v.address).includes(normalizeToken(cityFilter));
+    const matchGenre = !genreFilter || normalizeToken(v.genreFocus).includes(normalizeToken(genreFilter));
     return matchSearch && matchCity && matchGenre;
   });
 
@@ -212,10 +323,10 @@ const Venues = () => {
       <div style={{ marginBottom: '1.5rem' }}>
         <div className="badge" style={{ marginBottom: 8 }}>Discover by venue</div>
         <h1 className="section-title" style={{ fontSize: '1.8rem', marginBottom: 4 }}>
-          Irish Venues
+          Dublin Venues
         </h1>
         <p className="section-subtitle">
-          Explore Ireland's best live music spots and see what's on at each venue
+          Unified venue directory from local DB + live event providers, with merged venue events
         </p>
       </div>
 
@@ -268,6 +379,10 @@ const Venues = () => {
             <span>{cities.length} cit{cities.length !== 1 ? 'ies' : 'y'}</span>
           </div>
         )}
+        <div className="stat-pill">
+          <span style={{ color: 'var(--emerald)' }}>🎫</span>
+          <span>{eventsCatalog.length} live events indexed</span>
+        </div>
       </div>
 
       {/* Venue Grid */}
@@ -375,6 +490,16 @@ const Venues = () => {
                       {getGenreIcon(venue.genreFocus)} {venue.genreFocus}
                     </span>
                   )}
+                  {venue.event_count > 0 && (
+                    <span className="chip" style={{ fontSize: '0.68rem' }}>
+                      {venue.event_count} events
+                    </span>
+                  )}
+                  {Array.isArray(venue.sources) && venue.sources.slice(0, 2).map((source) => (
+                    <span key={source} className="chip" style={{ fontSize: '0.66rem' }}>
+                      {source}
+                    </span>
+                  ))}
                 </div>
               </div>
             </div>

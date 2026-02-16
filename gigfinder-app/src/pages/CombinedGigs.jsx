@@ -18,6 +18,13 @@ const formatTime = (iso) => {
   return d.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
 };
 
+const toMatchPercent = (score) => {
+  const value = Number(score);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (value <= 1) return Math.round(value * 100);
+  return Math.round((1 - Math.exp(-value / 6)) * 100);
+};
+
 /* ─── MATCH REASON BADGE ─── */
 const MatchBadge = ({ reasons, score }) => {
   if (!reasons && !score) return null;
@@ -108,7 +115,7 @@ const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
             color: event.rank_score > 0.7 ? 'var(--emerald)' : event.rank_score > 0.4 ? 'var(--gold)' : 'var(--muted)',
             fontSize: '0.65rem', fontWeight: 800
           }}>
-            {Math.round(event.rank_score * 100)}% match
+            {toMatchPercent(event.rank_score)}% match
           </div>
         )}
         {token && (

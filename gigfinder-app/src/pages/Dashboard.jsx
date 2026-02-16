@@ -9,6 +9,7 @@ import mlAPI from '../services/mlAPI';
 import { getToken } from '../services/apiClient';
 import { getBestImage, fetchArtistImage } from '../utils/imageUtils';
 import { ExplainabilityModal, TasteProfilePanel, FeedbackButtons, EventDensityHeatMap } from '../components/ml';
+import MixcloudPlayer from '../components/MixcloudPlayer';
 
 const formatDate = (iso) => {
   if (!iso) return 'TBA';
@@ -24,11 +25,21 @@ const formatTime = (iso) => {
   return d.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' });
 };
 
+const normalizeMatchScore = (score) => {
+  const value = Number(score);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (value <= 1) return value;
+  return 1 - Math.exp(-value / 6);
+};
+
+const toMatchPercent = (score) => Math.round(normalizeMatchScore(score) * 100);
+
 const GENRE_FILTERS = ['All', 'Electronic', 'Techno', 'House', 'Trad', 'Rock', 'Hip-Hop', 'Jazz', 'Pop', 'Folk', 'Comedy'];
 
 /* ─── MATCH REASON BADGE ─── */
 const MatchBadge = ({ reasons, score }) => {
   if (!reasons && !score) return null;
+  const normalizedScore = normalizeMatchScore(score);
   const reasonList = typeof reasons === 'string' ? reasons.split(',').map(r => r.trim()) : (reasons || []);
   const topReason = reasonList[0];
   if (!topReason && !score) return null;
@@ -39,8 +50,8 @@ const MatchBadge = ({ reasons, score }) => {
     : topReason === 'city_match' ? 'Your city'
     : topReason === 'collaborative' ? 'Fans like you'
     : topReason === 'popularity' ? 'Trending'
-    : score > 0.7 ? 'Top pick'
-    : score > 0.4 ? 'Good match'
+    : normalizedScore > 0.7 ? 'Top pick'
+    : normalizedScore > 0.4 ? 'Good match'
     : null;
 
   if (!label) return null;
@@ -335,6 +346,7 @@ const Dashboard = () => {
   const [mlRecommendations, setMlRecommendations] = useState([]);
   const [djs, setDjs] = useState([]);
   const [venues, setVenues] = useState([]);
+  const [mixcloudArtists, setMixcloudArtists] = useState([]);
   const [spotifyStatus, setSpotifyStatus] = useState(null);
   const [spotifyProfile, setSpotifyProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -353,7 +365,8 @@ const Dashboard = () => {
         const requests = [
           eventsAPI.searchEvents({ limit: 200 }),
           djAPI.getAllDJs(),
-          venueAPI.getAllVenues()
+          venueAPI.getAllVenues(),
+          eventsAPI.getPerformers({ include: 'mixcloud', city: 'Dublin', limit: 12 })
         ];
         if (token) {
           requests.push(eventsAPI.getFeed({ limit: 20 }));
@@ -365,9 +378,17 @@ const Dashboard = () => {
         setEvents(results[0].events || []);
         setDjs(Array.isArray(results[1]) ? results[1] : []);
         setVenues(Array.isArray(results[2]) ? results[2] : []);
-        if (results[3]) setFeedEvents(results[3].events || []);
-        if (results[4]?.recommendations) {
-          setMlRecommendations(results[4].recommendations);
+        const mixcloudList = Array.isArray(results[3]?.performers) ? results[3].performers : [];
+        const seenArtists = new Set();
+        setMixcloudArtists(mixcloudList.filter((artist) => {
+          const key = (artist?.name || '').toLowerCase().trim();
+          if (!key || seenArtists.has(key)) return false;
+          seenArtists.add(key);
+          return true;
+        }));
+        if (results[4]) setFeedEvents(results[4].events || []);
+        if (results[5]?.recommendations) {
+          setMlRecommendations(results[5].recommendations);
         }
       } catch (error) {
         console.error('Dashboard load error:', error);
@@ -536,7 +557,7 @@ const Dashboard = () => {
             justifyContent: 'flex-end',
             minHeight: 500
           }}>
-            {topScoredEvent.rank_score && topScoredEvent.rank_score > 0.7 && (
+            {topScoredEvent.rank_score && normalizeMatchScore(topScoredEvent.rank_score) > 0.7 && (
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
@@ -562,7 +583,7 @@ const Dashboard = () => {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/>
                 </svg>
-                {Math.round(topScoredEvent.rank_score * 100)}% Match
+                {toMatchPercent(topScoredEvent.rank_score)}% Match
               </motion.div>
             )}
             <motion.h1
@@ -677,6 +698,34 @@ const Dashboard = () => {
       {/* ─── TASTE PROFILE PANEL ─── */}
       {token && spotifyStatus?.linked && (
         <TasteProfilePanel />
+      )}
+
+      {/* ─── MIXCLOUD LIVE STREAMS ─── */}
+      {mixcloudArtists.length > 0 && (
+        <section>
+          <div className="section-header">
+            <h2 className="section-header-title">Mixcloud live streams</h2>
+            <Link to="/djs" className="section-header-link">All artists &rarr;</Link>
+          </div>
+          <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
+            {mixcloudArtists.slice(0, 6).map((artist, index) => (
+              <motion.div
+                key={`${artist.name}-${index}`}
+                className="card"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.04 }}
+                style={{ padding: '1rem', borderColor: 'rgba(82,177,252,0.2)' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.6rem' }}>
+                  <h3 style={{ fontWeight: 700, fontSize: '0.92rem' }} className="line-clamp-1">{artist.name}</h3>
+                  <span className="chip" style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>mixcloud</span>
+                </div>
+                <MixcloudPlayer mixcloudUrl={artist.mixcloudUrl} artistName={artist.name} height={90} />
+              </motion.div>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* ─── THIS WEEKEND CAROUSEL ─── */}
@@ -889,10 +938,14 @@ const Dashboard = () => {
                         width: 32, height: 32, borderRadius: 8,
                         background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: event.rank_score > 0.7 ? 'var(--emerald)' : event.rank_score > 0.4 ? 'var(--gold)' : 'var(--muted)',
+                        color: normalizeMatchScore(event.rank_score) > 0.7
+                          ? 'var(--emerald)'
+                          : normalizeMatchScore(event.rank_score) > 0.4
+                            ? 'var(--gold)'
+                            : 'var(--muted)',
                         fontSize: '0.65rem', fontWeight: 800
                       }}>
-                        {Math.round(event.rank_score * 100)}%
+                        {toMatchPercent(event.rank_score)}%
                       </div>
                     )}
                   </div>
@@ -975,10 +1028,14 @@ const Dashboard = () => {
                         width: 32, height: 32, borderRadius: 8,
                         background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: event.rank_score > 0.7 ? 'var(--emerald)' : event.rank_score > 0.4 ? 'var(--gold)' : 'var(--muted)',
+                        color: normalizeMatchScore(event.rank_score) > 0.7
+                          ? 'var(--emerald)'
+                          : normalizeMatchScore(event.rank_score) > 0.4
+                            ? 'var(--gold)'
+                            : 'var(--muted)',
                         fontSize: '0.65rem', fontWeight: 800
                       }}>
-                        {Math.round(event.rank_score * 100)}%
+                        {toMatchPercent(event.rank_score)}%
                       </div>
                     )}
                   </div>

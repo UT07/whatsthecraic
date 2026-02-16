@@ -1,16 +1,70 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import djAPI from '../services/djAPI';
 import eventsAPI from '../services/eventsAPI';
 import { getUser } from '../services/apiClient';
+import authAPI from '../services/authAPI';
 import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { fetchArtistImage } from '../utils/imageUtils';
-import MixcloudPlayer from '../components/MixcloudPlayer';
+
+const normalizeToken = (value) => (value ?? '').toString().toLowerCase().trim();
+
+const splitGenres = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeToken(item)).filter(Boolean);
+  }
+  return value
+    .toString()
+    .split(/[,/|]+/)
+    .map(item => normalizeToken(item))
+    .filter(Boolean);
+};
+
+const computeArtistRelevance = (artist, spotifyProfile, filters) => {
+  const spotifyArtists = (spotifyProfile?.top_artists || [])
+    .map(item => normalizeToken(typeof item === 'string' ? item : item?.name))
+    .filter(Boolean);
+  const spotifyGenres = (spotifyProfile?.top_genres || [])
+    .map(item => normalizeToken(typeof item === 'string' ? item : item?.genre))
+    .filter(Boolean);
+  const spotifyGenreSet = new Set(spotifyGenres);
+
+  let raw = 0;
+  const reasons = [];
+  const artistName = normalizeToken(artist.name);
+
+  const artistMatches = spotifyArtists.filter(token =>
+    token && (artistName.includes(token) || token.includes(artistName))
+  );
+  if (artistMatches.length > 0) {
+    raw += Math.min(artistMatches.length, 3) * 4;
+    reasons.push('spotify artist');
+  }
+
+  const genreMatches = (artist.genre_tokens || []).filter(token => spotifyGenreSet.has(token));
+  if (genreMatches.length > 0) {
+    raw += Math.min(genreMatches.length, 4) * 2;
+    reasons.push('genre match');
+  }
+
+  const qToken = normalizeToken(filters.q);
+  if (qToken && artistName.includes(qToken)) {
+    raw += 1;
+    reasons.push('query match');
+  }
+
+  const normalized = raw > 0 ? (1 - Math.exp(-raw / 6)) : 0;
+  return {
+    relevance_score: Number(normalized.toFixed(3)),
+    relevance_score_raw: Number(raw.toFixed(3)),
+    relevance_reasons: reasons
+  };
+};
 
 const DJs = () => {
   const user = getUser();
   const isAdmin = user?.role === 'admin';
-  const isOrganizerOrAdmin = user?.role === 'organizer' || user?.role === 'admin';
   const [djs, setDjs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -18,7 +72,7 @@ const DJs = () => {
   const [editingDJ, setEditingDJ] = useState(null);
   const [performers, setPerformers] = useState([]);
   const [performersLoading, setPerformersLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('local');
+  const [spotifyProfile, setSpotifyProfile] = useState(null);
 
   const [filters, setFilters] = useState({ q: '', city: '', genres: '', feeMax: '' });
   const { register, handleSubmit, reset } = useForm();
@@ -42,6 +96,12 @@ const DJs = () => {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchDJs(); loadPerformers(); }, []);
+
+  useEffect(() => {
+    authAPI.getSpotifyProfile()
+      .then(setSpotifyProfile)
+      .catch(() => setSpotifyProfile(null));
+  }, []);
 
   const runSearch = async () => {
     setSearching(true);
@@ -105,179 +165,196 @@ const DJs = () => {
     }
   };
 
-  // Generate deterministic gradient colors for DJs without images
-  const getDJGradient = (id) => {
-    const hue1 = (id * 67) % 360;
-    const hue2 = (id * 31 + 120) % 360;
-    return `linear-gradient(135deg, hsl(${hue1}, 40%, 18%), hsl(${hue2}, 25%, 12%))`;
-  };
+  const unifiedArtists = useMemo(() => {
+    const byName = new Map();
 
-  // DJ card with rich image loading
-  const DJCard = ({ dj, index }) => {
-    const [djImage, setDjImage] = useState(null);
+    const upsert = (incoming) => {
+      const key = normalizeToken(incoming.name);
+      if (!key) return;
+
+      const incomingGenres = splitGenres(incoming.genres);
+      if (!byName.has(key)) {
+        byName.set(key, {
+          ...incoming,
+          sources: [incoming.source].filter(Boolean),
+          genre_tokens: incomingGenres
+        });
+        return;
+      }
+
+      const existing = byName.get(key);
+      const sourceSet = new Set([...(existing.sources || []), incoming.source].filter(Boolean));
+      const genreSet = new Set([...(existing.genre_tokens || []), ...incomingGenres]);
+
+      byName.set(key, {
+        ...existing,
+        image: existing.image || incoming.image || null,
+        city: existing.city || incoming.city || null,
+        genres: existing.genres || incoming.genres || null,
+        genre_tokens: Array.from(genreSet),
+        sources: Array.from(sourceSet),
+        popularity: Math.max(Number(existing.popularity || 0), Number(incoming.popularity || 0)) || null,
+        spotifyUrl: existing.spotifyUrl || incoming.spotifyUrl || null,
+        mixcloudUrl: existing.mixcloudUrl || incoming.mixcloudUrl || null,
+        instagram: existing.instagram || incoming.instagram || null,
+        soundcloud: existing.soundcloud || incoming.soundcloud || null,
+        localDj: existing.localDj || incoming.localDj || null,
+        fee: existing.fee ?? incoming.fee ?? null,
+        currency: existing.currency || incoming.currency || null
+      });
+    };
+
+    djs.forEach((dj) => {
+      upsert({
+        name: dj.dj_name,
+        source: 'local',
+        city: dj.city || null,
+        genres: dj.genres || null,
+        instagram: dj.instagram || null,
+        soundcloud: dj.soundcloud || null,
+        fee: dj.numeric_fee === null || dj.numeric_fee === undefined ? null : Number(dj.numeric_fee),
+        currency: dj.currency || 'EUR',
+        localDj: dj,
+        image: null
+      });
+    });
+
+    performers.forEach((performer) => {
+      upsert({
+        ...performer,
+        source: performer.source || 'external',
+        name: performer.name,
+        city: performer.city || null,
+        genres: performer.genres || null,
+        image: performer.image || null
+      });
+    });
+
+    const qToken = normalizeToken(filters.q);
+    const cityToken = normalizeToken(filters.city);
+    const genreToken = normalizeToken(filters.genres);
+    const feeMax = Number(filters.feeMax);
+
+    return Array.from(byName.values())
+      .filter((artist) => {
+        if (qToken && !normalizeToken(artist.name).includes(qToken)) return false;
+        if (cityToken && !normalizeToken(artist.city).includes(cityToken)) return false;
+        if (genreToken) {
+          const hasGenreMatch = (artist.genre_tokens || []).some(token => token.includes(genreToken));
+          if (!hasGenreMatch) return false;
+        }
+        if (!Number.isNaN(feeMax) && feeMax > 0) {
+          const fee = Number(artist.fee);
+          if (!Number.isNaN(fee) && fee > feeMax) return false;
+        }
+        return true;
+      })
+      .map((artist) => ({
+        ...artist,
+        ...computeArtistRelevance(artist, spotifyProfile, filters)
+      }))
+      .sort((a, b) => {
+        if (b.relevance_score !== a.relevance_score) return b.relevance_score - a.relevance_score;
+        const popA = Number(a.popularity || 0);
+        const popB = Number(b.popularity || 0);
+        if (popB !== popA) return popB - popA;
+        if ((b.sources || []).length !== (a.sources || []).length) {
+          return (b.sources || []).length - (a.sources || []).length;
+        }
+        return (a.name || '').localeCompare(b.name || '');
+      });
+  }, [djs, performers, spotifyProfile, filters]);
+
+  const UnifiedArtistCard = ({ artist, index }) => {
+    const [artistImage, setArtistImage] = useState(artist.image || null);
     const [loadingImage, setLoadingImage] = useState(false);
-    const [showMixcloud, setShowMixcloud] = useState(false);
 
     useEffect(() => {
       const loadImage = async () => {
-        if (!loadingImage && dj.dj_name) {
-          setLoadingImage(true);
-          const image = await fetchArtistImage(dj.dj_name);
-          if (image) setDjImage(image);
-          setLoadingImage(false);
-        }
+        if (artistImage || loadingImage || !artist.name) return;
+        setLoadingImage(true);
+        const image = await fetchArtistImage(artist.name);
+        if (image) setArtistImage(image);
+        setLoadingImage(false);
       };
       loadImage();
-    }, [dj.dj_name, loadingImage]);
+    }, [artist.name, artistImage, loadingImage]);
 
     return (
       <motion.div
-        key={dj.dj_id}
+        key={`${artist.name}-${index}`}
         className="card-artist"
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: index * 0.03 }}
-      >
-        <div className="card-artist-img-wrap">
-          {djImage ? (
-            <img src={djImage} alt={dj.dj_name} className="card-artist-img" loading="lazy" />
-          ) : (
-            <div style={{
-              position: 'absolute', inset: 0,
-              background: getDJGradient(dj.dj_id),
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-              <span style={{ fontSize: '2.5rem', fontWeight: 800, color: 'rgba(255,255,255,0.12)' }}>
-                {(dj.dj_name || '?')[0].toUpperCase()}
-              </span>
-            </div>
-          )}
-          {/* Badge overlay */}
-          <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 2 }}>
-            <span className="badge" style={{ fontSize: '0.6rem' }}>
-              {dj.city || 'Ireland'}
-            </span>
-          </div>
-        </div>
-        <div className="card-artist-body">
-          <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.2rem' }}>
-            {dj.dj_name}
-          </h3>
-          <p className="line-clamp-1" style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.4rem' }}>
-            {dj.genres || 'Various genres'}
-          </p>
-          <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-            {dj.numeric_fee && (
-              <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>
-                {dj.currency || 'EUR'} {dj.numeric_fee}
-              </span>
-            )}
-            {dj.instagram && (
-              <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>IG</span>
-            )}
-            {dj.soundcloud && (
-              <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>SC</span>
-            )}
-            <button
-              onClick={() => setShowMixcloud(!showMixcloud)}
-              className="chip"
-              style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem', cursor: 'pointer', background: showMixcloud ? 'rgba(82,177,252,0.2)' : '', borderColor: showMixcloud ? '#52B1FC' : '' }}
-              title="Listen on Mixcloud"
-            >
-              Mix
-            </button>
-          </div>
-          {showMixcloud && (
-            <div style={{ marginBottom: '0.5rem' }}>
-              <MixcloudPlayer artistName={dj.dj_name} height={60} />
-            </div>
-          )}
-          {isAdmin && (
-            <div style={{ display: 'flex', gap: '0.35rem' }}>
-              <button onClick={() => openModal(dj)} className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: '0.75rem' }}>Edit</button>
-              <button onClick={() => handleDeleteDJ(dj.dj_id)} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6V20a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2V6"/></svg>
-              </button>
-            </div>
-          )}
-        </div>
-      </motion.div>
-    );
-  };
-
-  // Performer card component (separate to use hooks properly)
-  const PerformerCard = ({ performer, index }) => {
-    const [showMixcloud, setShowMixcloud] = useState(false);
-
-    return (
-      <motion.div
-        key={`${performer.name}-${index}`}
-        className="card-artist"
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: index * 0.02 }}
+        transition={{ duration: 0.25, delay: index * 0.02 }}
       >
         <div className="card-artist-img-wrap" style={{ paddingTop: '100%' }}>
-          {performer.image ? (
-            <img src={performer.image} alt={performer.name} className="card-artist-img" loading="lazy" />
+          {artistImage ? (
+            <img src={artistImage} alt={artist.name} className="card-artist-img" loading="lazy" />
           ) : (
             <div style={{
               position: 'absolute', inset: 0,
-              background: `linear-gradient(135deg, hsl(${(index * 43) % 360}, 35%, 16%), hsl(${(index * 89) % 360}, 20%, 10%))`,
+              background: `linear-gradient(135deg, hsl(${(index * 53) % 360}, 35%, 16%), hsl(${(index * 89) % 360}, 25%, 10%))`,
               display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>
               <span style={{ fontSize: '3rem', fontWeight: 800, color: 'rgba(255,255,255,0.12)' }}>
-                {(performer.name || '?')[0].toUpperCase()}
+                {(artist.name || '?')[0].toUpperCase()}
               </span>
             </div>
           )}
-          <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
-            <span className={`badge ${performer.source === 'spotify' ? '' : performer.source === 'mixcloud' ? '' : 'badge-sky'}`}
-              style={{ fontSize: '0.6rem',
-                ...(performer.source === 'spotify' ? { background: 'rgba(29,185,84,0.2)', color: '#1DB954' } : {}),
-                ...(performer.source === 'mixcloud' ? { background: 'rgba(82,177,252,0.2)', color: '#52B1FC' } : {})
-              }}>
-              {performer.source}
-            </span>
-          </div>
+          {artist.relevance_score > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: 8,
+              left: 8,
+              zIndex: 3,
+              padding: '0.25rem 0.5rem',
+              borderRadius: 8,
+              background: 'rgba(0,0,0,0.65)',
+              color: artist.relevance_score > 0.7 ? 'var(--emerald)' : artist.relevance_score > 0.4 ? 'var(--gold)' : 'var(--muted)',
+              fontSize: '0.66rem',
+              fontWeight: 800
+            }}>
+              {Math.round(artist.relevance_score * 100)}% match
+            </div>
+          )}
         </div>
         <div className="card-artist-body">
           <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.3rem' }}>
-            {performer.name}
+            {artist.name}
           </h3>
-          {performer.genres && (
-            <p className="line-clamp-2" style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem', minHeight: '2.4rem' }}>
-              {Array.isArray(performer.genres) ? performer.genres.slice(0, 3).join(', ') : performer.genres}
-            </p>
-          )}
-          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-            {(performer.spotifyUrl || performer.source === 'spotify') && (
-              <a href={performer.spotifyUrl} target="_blank" rel="noopener noreferrer"
-                className="chip" style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(29,185,84,0.15)', borderColor: '#1DB954', color: '#1DB954', textDecoration: 'none' }}>
+          <p className="line-clamp-2" style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem', minHeight: '2.4rem' }}>
+            {artist.genres || 'Genre unavailable'}
+          </p>
+          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.55rem' }}>
+            {(artist.sources || []).map(source => (
+              <span key={source} className="chip" style={{ fontSize: '0.64rem', padding: '0.2rem 0.45rem' }}>
+                {source}
+              </span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+            {artist.spotifyUrl && (
+              <a href={artist.spotifyUrl} target="_blank" rel="noopener noreferrer"
+                className="chip"
+                style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(29,185,84,0.15)', borderColor: '#1DB954', color: '#1DB954', textDecoration: 'none' }}>
                 Spotify ↗
               </a>
             )}
-            {(performer.mixcloudUrl || performer.source === 'mixcloud') && (
+            {artist.mixcloudUrl && (
+              <a href={artist.mixcloudUrl} target="_blank" rel="noopener noreferrer"
+                className="chip"
+                style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(82,177,252,0.15)', borderColor: '#52B1FC', color: '#52B1FC', textDecoration: 'none' }}>
+                Mixcloud ↗
+              </a>
+            )}
+            {artist.localDj && isAdmin && (
               <>
-                <a href={performer.mixcloudUrl} target="_blank" rel="noopener noreferrer"
-                  className="chip" style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(82,177,252,0.15)', borderColor: '#52B1FC', color: '#52B1FC', textDecoration: 'none' }}>
-                  Mixcloud ↗
-                </a>
-                <button
-                  onClick={() => setShowMixcloud(!showMixcloud)}
-                  className="chip"
-                  style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', cursor: 'pointer', background: showMixcloud ? 'rgba(82,177,252,0.2)' : '', borderColor: showMixcloud ? '#52B1FC' : '' }}
-                >
-                  {showMixcloud ? 'Hide' : 'Play'}
-                </button>
+                <button onClick={() => openModal(artist.localDj)} className="btn btn-outline btn-sm" style={{ fontSize: '0.72rem' }}>Edit</button>
+                <button onClick={() => handleDeleteDJ(artist.localDj.dj_id)} className="btn btn-ghost btn-sm" style={{ fontSize: '0.72rem' }}>Delete</button>
               </>
             )}
           </div>
-          {showMixcloud && (
-            <div style={{ marginTop: '0.5rem' }}>
-              <MixcloudPlayer artistName={performer.name} height={80} />
-            </div>
-          )}
         </div>
       </motion.div>
     );
@@ -290,7 +367,7 @@ const DJs = () => {
         <div>
           <span className="badge" style={{ marginBottom: '0.5rem' }}>Local Irish Selection</span>
           <h1 className="section-title" style={{ marginBottom: '0.3rem' }}>Artists & DJs</h1>
-          <p className="section-subtitle">Discover Ireland's finest talent and international acts</p>
+          <p className="section-subtitle">Unified artists across local DB + external APIs, ranked by your Spotify taste</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button className="btn btn-outline btn-sm" onClick={loadPerformers} disabled={performersLoading}>
@@ -327,66 +404,29 @@ const DJs = () => {
         <button className="btn btn-ghost btn-sm" onClick={resetSearch}>Reset</button>
       </div>
 
-      {/* Tabs */}
-      <div className="tabs" style={{ width: 'fit-content' }}>
-        <button className={`tab ${activeTab === 'local' ? 'tab-active' : ''}`} onClick={() => setActiveTab('local')}>
-          Local Irish ({djs.length})
-        </button>
-        <button className={`tab ${activeTab === 'discovered' ? 'tab-active' : ''}`} onClick={() => setActiveTab('discovered')}>
-          Discovered ({performers.length})
-        </button>
-      </div>
-
-      {/* Local DJs Grid */}
-      {activeTab === 'local' && (
-        <section>
-          {loading ? (
-            <div className="grid-events">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="skeleton" style={{ height: 300, borderRadius: 14 }} />
-              ))}
-            </div>
-          ) : djs.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-              <p style={{ color: 'var(--muted)' }}>No artists found. Try adjusting your search.</p>
-            </div>
-          ) : (
-            <div className="grid-events">
-              {djs.map((dj, index) => (
-                <DJCard key={dj.dj_id} dj={dj} index={index} />
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Discovered Performers */}
-      {activeTab === 'discovered' && (
-        <section>
-          {performersLoading ? (
-            <div className="grid-events">
-              {[...Array(12)].map((_, i) => (
-                <div key={i} className="skeleton" style={{ height: 320, borderRadius: 14 }} />
-              ))}
-            </div>
-          ) : performers.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#1DB954', margin: '0 auto 1rem' }}>
-                <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2z"/>
-              </svg>
-              <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.3rem' }}>Discover artists from Spotify & Ticketmaster</p>
-              <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>Click "Discover artists" to pull artists from your connected platforms</p>
-              <button className="btn btn-primary btn-sm" onClick={loadPerformers}>Discover artists</button>
-            </div>
-          ) : (
-            <div className="grid-events" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
-              {performers.map((performer, index) => (
-                <PerformerCard key={`${performer.name}-${index}`} performer={performer} index={index} />
-              ))}
-            </div>
-          )}
-        </section>
-      )}
+      <section>
+        {(loading || performersLoading) ? (
+          <div className="grid-events">
+            {[...Array(12)].map((_, i) => (
+              <div key={i} className="skeleton" style={{ height: 320, borderRadius: 14 }} />
+            ))}
+          </div>
+        ) : unifiedArtists.length === 0 ? (
+          <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
+            <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.3rem' }}>No artists found</p>
+            <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
+              Try adjusting search filters or refresh discovery sources.
+            </p>
+            <button className="btn btn-primary btn-sm" onClick={loadPerformers}>Refresh sources</button>
+          </div>
+        ) : (
+          <div className="grid-events" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
+            {unifiedArtists.map((artist, index) => (
+              <UnifiedArtistCard key={`${artist.name}-${index}`} artist={artist} index={index} />
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Modal */}
       {modalOpen && (

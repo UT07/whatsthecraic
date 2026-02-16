@@ -824,6 +824,65 @@ const buildEventResponse = (row, sources = []) => {
   };
 };
 
+const dedupeEventPayloads = (events) => {
+  const byKey = new Map();
+
+  (Array.isArray(events) ? events : []).forEach((event) => {
+    const key = [
+      normalizeToken(event.title),
+      normalizeToken(event.venue_name),
+      (event.start_time || '').slice(0, 16)
+    ].join('::');
+
+    if (!key || !normalizeToken(event.title)) return;
+
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        ...event,
+        sources: Array.isArray(event.sources) ? [...event.sources] : [],
+        genres: Array.isArray(event.genres) ? [...event.genres] : [],
+        tags: Array.isArray(event.tags) ? [...event.tags] : [],
+        images: Array.isArray(event.images) ? [...event.images] : [],
+        rank_reasons: Array.isArray(event.rank_reasons) ? [...event.rank_reasons] : []
+      });
+      return;
+    }
+
+    const existing = byKey.get(key);
+    existing.sources = [
+      ...existing.sources,
+      ...(Array.isArray(event.sources) ? event.sources : [])
+    ].filter(Boolean);
+    existing.genres = dedupeList([...(existing.genres || []), ...(event.genres || [])]);
+    existing.tags = dedupeList([...(existing.tags || []), ...(event.tags || [])]);
+    if ((!existing.images || existing.images.length === 0) && Array.isArray(event.images) && event.images.length > 0) {
+      existing.images = event.images;
+    }
+
+    const existingRank = Number(existing.rank_score || 0);
+    const incomingRank = Number(event.rank_score || 0);
+    if (incomingRank > existingRank) {
+      existing.rank_score = event.rank_score;
+      existing.rank_score_raw = event.rank_score_raw;
+      existing.rank_reason_details = event.rank_reason_details;
+    }
+    existing.rank_reasons = dedupeList([...(existing.rank_reasons || []), ...(event.rank_reasons || [])]);
+
+    byKey.set(key, existing);
+  });
+
+  return Array.from(byKey.values()).map((event) => ({
+    ...event,
+    sources: dedupeList((event.sources || []).map((source) =>
+      typeof source === 'string' ? source : `${source.source}:${source.source_id || ''}`
+    ))
+      .map((key) => {
+        const [source, sourceId] = key.split(':');
+        return sourceId ? { source, source_id: sourceId } : { source };
+      })
+  }));
+};
+
 const getUserSignals = async (userId) => {
   const [prefRows] = await pool.query(
     `SELECT preferred_genres, preferred_artists, preferred_cities, preferred_venues,
@@ -1099,6 +1158,134 @@ const scoreEventRow = (row, signals) => {
   return { score, reasons };
 };
 
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const normalizeRankScore = (rawScore) => {
+  const score = Number(rawScore);
+  if (!Number.isFinite(score) || score <= 0) return 0;
+  // Convert open-ended additive scores into a stable 0..1 range for UI percentages.
+  return Number(clamp(1 - Math.exp(-score / 6), 0, 1).toFixed(3));
+};
+
+const RANK_REASON_MAP = {
+  preferred_genre: 'genre_match',
+  spotify_genre: 'genre_match',
+  saved_genre: 'genre_match',
+  preferred_artist: 'artist_match',
+  spotify_artist: 'artist_match',
+  preferred_dj: 'artist_match',
+  saved_title: 'artist_match',
+  preferred_venue: 'venue_match',
+  saved_venue: 'venue_match',
+  preferred_city: 'city_match',
+  saved_city: 'city_match',
+  within_budget: 'budget_match',
+  over_budget: 'budget_mismatch',
+  weekend: 'day_match',
+  weekday: 'day_match',
+  soon: 'time_boost',
+  saved_event: 'saved_event'
+};
+
+const buildRankReasons = (reasons = []) => {
+  if (!Array.isArray(reasons)) return [];
+  const mapped = reasons
+    .map((reason) => {
+      if (typeof reason === 'string') {
+        return RANK_REASON_MAP[reason] || reason;
+      }
+      const type = reason?.type;
+      if (!type) return null;
+      return RANK_REASON_MAP[type] || type;
+    })
+    .filter(Boolean);
+
+  return dedupeList(mapped);
+};
+
+const parseGenreTokens = (genres) => {
+  if (!genres) return [];
+  if (Array.isArray(genres)) {
+    return genres.flatMap(item => normalizeTokenList(item)).filter(Boolean);
+  }
+  return normalizeTokenList(genres);
+};
+
+const mergePerformer = (existing, incoming) => {
+  const merged = { ...existing };
+
+  const sourceSet = new Set([...(existing.sources || []), ...(incoming.sources || []), incoming.source].filter(Boolean));
+  merged.sources = Array.from(sourceSet);
+  merged.source = merged.sources[0] || incoming.source || existing.source || 'unknown';
+
+  const incomingGenres = parseGenreTokens(incoming.genres);
+  const existingGenres = parseGenreTokens(existing.genres);
+  const genreSet = new Set([...existingGenres, ...incomingGenres]);
+  merged.genre_tokens = Array.from(genreSet);
+  merged.genres = merged.genre_tokens.length > 0
+    ? merged.genre_tokens.slice(0, 8).join(', ')
+    : (existing.genres || incoming.genres || null);
+
+  if (!merged.image && incoming.image) merged.image = incoming.image;
+  if (!merged.city && incoming.city) merged.city = incoming.city;
+  if (!merged.spotifyUrl && incoming.spotifyUrl) merged.spotifyUrl = incoming.spotifyUrl;
+  if (!merged.mixcloudUrl && incoming.mixcloudUrl) merged.mixcloudUrl = incoming.mixcloudUrl;
+  if (!merged.instagram && incoming.instagram) merged.instagram = incoming.instagram;
+  if (!merged.soundcloud && incoming.soundcloud) merged.soundcloud = incoming.soundcloud;
+  if (!merged.currency && incoming.currency) merged.currency = incoming.currency;
+  if ((merged.fee === null || merged.fee === undefined) && incoming.fee !== null && incoming.fee !== undefined) {
+    merged.fee = incoming.fee;
+  }
+
+  const existingPopularity = Number(existing.popularity || 0);
+  const incomingPopularity = Number(incoming.popularity || 0);
+  merged.popularity = Math.max(existingPopularity, incomingPopularity) || null;
+
+  return merged;
+};
+
+const scorePerformer = (performer, signals, keyword = '') => {
+  const reasons = [];
+  let raw = 0;
+
+  const performerName = normalizeToken(performer.name);
+  const performerGenres = expandGenres(parseGenreTokens(performer.genre_tokens || performer.genres));
+  const preferredGenres = new Set([...(signals.preferredGenres || []), ...(signals.spotifyGenres || [])].filter(Boolean));
+  const preferredArtists = dedupeList([...(signals.preferredArtists || []), ...(signals.spotifyArtists || [])].filter(Boolean));
+
+  const artistMatches = preferredArtists.filter(artist =>
+    artist && (performerName.includes(artist) || artist.includes(performerName))
+  );
+  if (artistMatches.length > 0) {
+    raw += Math.min(artistMatches.length, 3) * 4;
+    reasons.push('artist_match');
+  }
+
+  const genreMatches = performerGenres.filter(genre => preferredGenres.has(genre));
+  if (genreMatches.length > 0) {
+    raw += Math.min(genreMatches.length, 4) * 2;
+    reasons.push('genre_match');
+  }
+
+  const cityToken = normalizeToken(performer.city);
+  if (cityToken && (signals.preferredCities || []).includes(cityToken)) {
+    raw += 1;
+    reasons.push('city_match');
+  }
+
+  if (keyword && performerName.includes(keyword)) {
+    raw += 1;
+    reasons.push('keyword_match');
+  }
+
+  const normalized = normalizeRankScore(raw);
+  return {
+    raw: Number(raw.toFixed(3)),
+    score: normalized,
+    reasons: dedupeList(reasons)
+  };
+};
+
 const hydratePlan = (row) => {
   if (!row) return null;
   return {
@@ -1300,13 +1487,17 @@ app.get('/v1/events/search', async (req, res) => {
     const payload = buildEventResponse(row, sourcesByEvent.get(row.id) || []);
     if (scoresByEvent.has(row.id)) {
       const scoreData = scoresByEvent.get(row.id);
-      payload.rank_score = Number(scoreData.score.toFixed(3));
-      payload.rank_reasons = scoreData.reasons;
+      const rawScore = Number(scoreData.score.toFixed(3));
+      payload.rank_score_raw = rawScore;
+      payload.rank_score = normalizeRankScore(rawScore);
+      payload.rank_reasons = buildRankReasons(scoreData.reasons);
+      payload.rank_reason_details = scoreData.reasons;
     }
     return payload;
   });
 
-  return res.json({ events, count: events.length, ranked });
+  const dedupedEvents = dedupeEventPayloads(events);
+  return res.json({ events: dedupedEvents, count: dedupedEvents.length, ranked });
 });
 
 app.get('/v1/performers', async (req, res) => {
@@ -1342,6 +1533,21 @@ app.get('/v1/performers', async (req, res) => {
   const toDate = parseDateParam(to, new Date(Date.now() + 90 * 24 * 60 * 60 * 1000));
   const limitValue = Math.min(Number.parseInt(limit || '200', 10) || 200, 500);
   const keyword = q ? normalizeToken(q) : '';
+  const cityToken = city ? normalizeToken(city) : '';
+
+  let performerSignals = null;
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    try {
+      const payload = jwt.verify(authHeader.slice(7), JWT_SECRET);
+      const userId = payload?.user_id || null;
+      if (userId) {
+        performerSignals = await getUserSignals(userId);
+      }
+    } catch {
+      performerSignals = null;
+    }
+  }
 
   const performers = [];
 
@@ -1497,15 +1703,71 @@ app.get('/v1/performers', async (req, res) => {
     }
   }
 
-  const deduped = [];
-  const seen = new Set();
+  const mergedByName = new Map();
   performers.forEach(item => {
     const key = normalizeToken(item.name);
-    if (!key || seen.has(key)) return;
-    if (keyword && !key.includes(keyword)) return;
-    seen.add(key);
-    deduped.push(item);
+    if (!key) return;
+
+    const genreText = Array.isArray(item.genres)
+      ? item.genres.join(' ')
+      : (item.genres || '');
+    const matchesKeyword = !keyword
+      || key.includes(keyword)
+      || normalizeToken(genreText).includes(keyword);
+    const matchesCity = !cityToken || normalizeToken(item.city).includes(cityToken);
+    if (!matchesKeyword || !matchesCity) return;
+
+    if (!mergedByName.has(key)) {
+      const genreTokens = parseGenreTokens(item.genres);
+      mergedByName.set(key, {
+        ...item,
+        sources: [item.source].filter(Boolean),
+        genre_tokens: genreTokens
+      });
+      return;
+    }
+
+    const existing = mergedByName.get(key);
+    mergedByName.set(key, mergePerformer(existing, item));
   });
+
+  let deduped = Array.from(mergedByName.values()).map(item => ({
+    ...item,
+    sources: dedupeList(item.sources || []),
+    source_count: (item.sources || []).length
+  }));
+
+  if (performerSignals) {
+    deduped = deduped
+      .map(item => {
+        const scoreData = scorePerformer(item, performerSignals, keyword);
+        return {
+          ...item,
+          relevance_score: scoreData.score,
+          relevance_score_raw: scoreData.raw,
+          relevance_reasons: scoreData.reasons
+        };
+      })
+      .sort((a, b) => {
+        if (b.relevance_score !== a.relevance_score) {
+          return b.relevance_score - a.relevance_score;
+        }
+        const popA = Number(a.popularity || 0);
+        const popB = Number(b.popularity || 0);
+        if (popB !== popA) return popB - popA;
+        return a.name.localeCompare(b.name);
+      });
+  } else {
+    deduped.sort((a, b) => {
+      const popA = Number(a.popularity || 0);
+      const popB = Number(b.popularity || 0);
+      if (popB !== popA) return popB - popA;
+      if (b.source_count !== a.source_count) return b.source_count - a.source_count;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  deduped = deduped.slice(0, limitValue);
 
   return res.json({ performers: deduped, count: deduped.length });
 });
@@ -1643,10 +1905,15 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
 
   const events = scored.map(item => ({
     ...item.event,
+    rank_score_raw: Number(item.ranking.score.toFixed(3)),
+    rank_score: normalizeRankScore(item.ranking.score),
+    rank_reasons: buildRankReasons(item.ranking.reasons),
+    rank_reason_details: item.ranking.reasons,
     ranking: item.ranking
   }));
 
-  return res.json({ events, count: events.length });
+  const dedupedEvents = dedupeEventPayloads(events);
+  return res.json({ events: dedupedEvents, count: dedupedEvents.length });
 });
 
 const alertSchema = z.object({

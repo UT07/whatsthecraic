@@ -125,8 +125,14 @@ const ExplainabilityModal = ({ isOpen, onClose, event }) => {
   };
 
   const totalScore = chartData.reduce((sum, d) => sum + d.weight, 0);
+  const normalizedRankScore = (() => {
+    const value = Number(event.rank_score);
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    if (value <= 1) return value;
+    return 1 - Math.exp(-value / 6);
+  })();
   const matchPercentage = event.rank_score
-    ? Math.round(event.rank_score * 100)
+    ? Math.round(normalizedRankScore * 100)
     : Math.min(Math.round((totalScore / 15) * 100), 100);
 
   return (
