@@ -222,12 +222,13 @@ export const fetchMixcloudArtistImage = async (artistName) => {
 export const fetchArtistImage = async (artistName) => {
   if (!artistName) return null;
 
+  // HOTFIX: Spotify disabled due to 429 rate limiting on production backend
   // Try Spotify first (usually better quality)
-  let imageUrl = await fetchSpotifyArtistImage(artistName);
-  if (imageUrl) return imageUrl;
+  // let imageUrl = await fetchSpotifyArtistImage(artistName);
+  // if (imageUrl) return imageUrl;
 
-  // Fallback to Mixcloud
-  imageUrl = await fetchMixcloudArtistImage(artistName);
+  // Use Mixcloud (no rate limits)
+  let imageUrl = await fetchMixcloudArtistImage(artistName);
   if (imageUrl) return imageUrl;
 
   return null;
