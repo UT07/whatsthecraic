@@ -47,6 +47,9 @@ data:
   # Mixcloud
   MIXCLOUD_ENABLED: "true"
 
+  # Spotify (rate limiting is now handled by in-memory cache in spotify-client.js)
+  # No external Redis required - uses built-in caching with 24h TTL
+
   # Rate limiting
   RATE_LIMIT_WINDOW_MS: "60000"
   RATE_LIMIT_MAX: "60"

@@ -37,78 +37,144 @@ jobs:
         run: |
           SERVICES=("auth-service" "events-service" "dj-service" "venue-service" "aggregator-service" "ml-service")
           mkdir -p ml-service/models
+          echo "Building images with tag: $IMAGE_TAG"
           for SVC in "${SERVICES[@]}"; do
             echo "Building $SVC..."
-            docker build -t $ECR_REGISTRY/whatsthecraic/$SVC:$IMAGE_TAG -t $ECR_REGISTRY/whatsthecraic/$SVC:latest ./$SVC
+            docker build \
+              --label "git.commit=$IMAGE_TAG" \
+              --label "git.branch=${GITHUB_REF#refs/heads/}" \
+              --label "build.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              -t $ECR_REGISTRY/whatsthecraic/$SVC:$IMAGE_TAG \
+              -t $ECR_REGISTRY/whatsthecraic/$SVC:latest \
+              ./$SVC
             docker push $ECR_REGISTRY/whatsthecraic/$SVC:$IMAGE_TAG
             docker push $ECR_REGISTRY/whatsthecraic/$SVC:latest
             echo "$SVC pushed successfully"
           done
+          echo "All images built and pushed with tag: $IMAGE_TAG"
 
       # IMPORTANT: EC2_INSTANCE_ID secret must be set to: i-077f139e329506bf5
       # Update in GitHub repo settings: Settings > Secrets and variables > Actions
       - name: Deploy to k3s via SSM
         env:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
-            --timeout-seconds 300 \
+            --timeout-seconds 600 \
             --parameters '{"commands":[
+              "echo \"Starting deployment at $(date)\"",
+              "# Refresh ECR credentials",
               "/usr/local/bin/ecr-refresh.sh",
               "sleep 5",
-              "kubectl rollout restart deployment -n whatsthecraic",
-              "kubectl rollout status deployment -n whatsthecraic --timeout=120s || true",
-              "kubectl get pods -n whatsthecraic"
+              "# Update image tags to specific commit SHA",
+              "export IMAGE_TAG='"$IMAGE_TAG"'",
+              "kubectl set image deployment/auth-service auth-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/auth-service:$IMAGE_TAG -n whatsthecraic",
+              "kubectl set image deployment/events-service events-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/events-service:$IMAGE_TAG -n whatsthecraic",
+              "kubectl set image deployment/dj-service dj-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/dj-service:$IMAGE_TAG -n whatsthecraic",
+              "kubectl set image deployment/venue-service venue-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/venue-service:$IMAGE_TAG -n whatsthecraic",
+              "kubectl set image deployment/aggregator aggregator=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/aggregator-service:$IMAGE_TAG -n whatsthecraic",
+              "kubectl set image deployment/ml-service ml-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:$IMAGE_TAG -n whatsthecraic",
+              "# Wait for all deployments to complete",
+              "echo \"Waiting for rollout to complete...\"",
+              "kubectl rollout status deployment/auth-service -n whatsthecraic --timeout=180s",
+              "kubectl rollout status deployment/events-service -n whatsthecraic --timeout=180s",
+              "kubectl rollout status deployment/dj-service -n whatsthecraic --timeout=180s",
+              "kubectl rollout status deployment/venue-service -n whatsthecraic --timeout=180s",
+              "kubectl rollout status deployment/aggregator -n whatsthecraic --timeout=180s",
+              "kubectl rollout status deployment/ml-service -n whatsthecraic --timeout=180s",
+              "# Show deployment status",
+              "kubectl get pods -n whatsthecraic -o wide",
+              "echo \"Deployment completed at $(date)\""
             ]}' \
             --query 'Command.CommandId' --output text)
 
-          for i in $(seq 1 30); do
+          echo "Waiting for deployment to complete (command: $COMMAND_ID)..."
+          for i in $(seq 1 60); do
             STATUS=$(aws ssm get-command-invocation \
               --command-id $COMMAND_ID \
               --instance-id $INSTANCE_ID \
               --query 'Status' --output text 2>/dev/null || echo "Pending")
-            echo "Attempt $i: $STATUS"
-            if [ "$STATUS" = "Success" ]; then break; fi
-            if [ "$STATUS" = "Failed" ]; then
+            echo "Attempt $i/60: $STATUS"
+            if [ "$STATUS" = "Success" ]; then
+              echo "Deployment completed successfully!"
               aws ssm get-command-invocation \
                 --command-id $COMMAND_ID \
                 --instance-id $INSTANCE_ID \
-                --query 'StandardErrorContent' --output text 2>/dev/null
+                --query 'StandardOutputContent' --output text 2>/dev/null || true
+              break
+            fi
+            if [ "$STATUS" = "Failed" ]; then
+              echo "Deployment failed!"
+              aws ssm get-command-invocation \
+                --command-id $COMMAND_ID \
+                --instance-id $INSTANCE_ID \
+                --query 'StandardErrorContent' --output text 2>/dev/null || true
+              aws ssm get-command-invocation \
+                --command-id $COMMAND_ID \
+                --instance-id $INSTANCE_ID \
+                --query 'StandardOutputContent' --output text 2>/dev/null || true
               exit 1
             fi
             sleep 10
           done
 
+          if [ "$STATUS" != "Success" ]; then
+            echo "Deployment timed out after 10 minutes"
+            exit 1
+          fi
+
       - name: Health checks
         env:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
-          for attempt in $(seq 1 5); do
-            echo "Health check attempt $attempt/5"
+          echo "Running comprehensive health checks..."
+          for attempt in $(seq 1 6); do
+            echo "Health check attempt $attempt/6"
             COMMAND_ID=$(aws ssm send-command \
               --instance-ids $INSTANCE_ID \
               --document-name "AWS-RunShellScript" \
+              --timeout-seconds 120 \
               --parameters '{"commands":[
-                "kubectl get pods -n whatsthecraic",
-                "kubectl exec deploy/aggregator -n whatsthecraic -- wget -qO- http://localhost:4000/health && echo AGG_OK || echo AGG_FAIL",
-                "kubectl exec deploy/auth-service -n whatsthecraic -- wget -qO- http://localhost:3001/health && echo AUTH_OK || echo AUTH_FAIL"
+                "echo \"=== Pod Status ===\"",
+                "kubectl get pods -n whatsthecraic -o wide",
+                "echo \"\n=== Checking aggregator health ===\"",
+                "kubectl exec deploy/aggregator -n whatsthecraic -- wget -qO- http://localhost:4000/health && echo \"AGG_OK\" || echo \"AGG_FAIL\"",
+                "echo \"\n=== Checking auth-service health ===\"",
+                "kubectl exec deploy/auth-service -n whatsthecraic -- wget -qO- http://localhost:3001/health && echo \"AUTH_OK\" || echo \"AUTH_FAIL\"",
+                "echo \"\n=== Checking events-service health ===\"",
+                "kubectl exec deploy/events-service -n whatsthecraic -- wget -qO- http://localhost:4003/health && echo \"EVENTS_OK\" || echo \"EVENTS_FAIL\"",
+                "echo \"\n=== Checking dj-service health ===\"",
+                "kubectl exec deploy/dj-service -n whatsthecraic -- wget -qO- http://localhost:4002/health && echo \"DJ_OK\" || echo \"DJ_FAIL\"",
+                "echo \"\n=== Checking venue-service health ===\"",
+                "kubectl exec deploy/venue-service -n whatsthecraic -- wget -qO- http://localhost:4001/health && echo \"VENUE_OK\" || echo \"VENUE_FAIL\"",
+                "echo \"\n=== Checking ml-service health ===\"",
+                "kubectl exec deploy/ml-service -n whatsthecraic -- wget -qO- http://localhost:4004/health && echo \"ML_OK\" || echo \"ML_FAIL\""
               ]}' \
               --query 'Command.CommandId' --output text)
-            sleep 25
+
+            sleep 30
             OUTPUT=$(aws ssm get-command-invocation \
               --command-id $COMMAND_ID --instance-id $INSTANCE_ID \
               --query 'StandardOutputContent' --output text 2>/dev/null || echo "PENDING")
             echo "$OUTPUT"
-            if echo "$OUTPUT" | grep -q "AGG_OK"; then
-              echo "Health checks passed!"
+
+            # Check if all critical services are healthy
+            AGG_OK=$(echo "$OUTPUT" | grep -c "AGG_OK" || echo "0")
+            AUTH_OK=$(echo "$OUTPUT" | grep -c "AUTH_OK" || echo "0")
+            EVENTS_OK=$(echo "$OUTPUT" | grep -c "EVENTS_OK" || echo "0")
+
+            if [ "$AGG_OK" = "1" ] && [ "$AUTH_OK" = "1" ] && [ "$EVENTS_OK" = "1" ]; then
+              echo "All critical services are healthy!"
               exit 0
             fi
-            echo "Services not ready yet, waiting 20s..."
-            sleep 20
+
+            echo "Some services not ready yet, waiting 25s before retry..."
+            sleep 25
           done
-          echo "Health checks failed after 5 attempts"
+          echo "Health checks failed after 6 attempts"
           exit 1
 
   deploy-frontend:
