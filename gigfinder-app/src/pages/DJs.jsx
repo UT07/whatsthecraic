@@ -4,6 +4,8 @@ import eventsAPI from '../services/eventsAPI';
 import { getUser } from '../services/apiClient';
 import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
+import { fetchArtistImage } from '../utils/imageUtils';
+import MixcloudPlayer from '../components/MixcloudPlayer';
 
 const DJs = () => {
   const user = getUser();
@@ -110,6 +112,99 @@ const DJs = () => {
     return `linear-gradient(135deg, hsl(${hue1}, 40%, 18%), hsl(${hue2}, 25%, 12%))`;
   };
 
+  // DJ card with rich image loading
+  const DJCard = ({ dj, index }) => {
+    const [djImage, setDjImage] = useState(null);
+    const [loadingImage, setLoadingImage] = useState(false);
+    const [showMixcloud, setShowMixcloud] = useState(false);
+
+    useEffect(() => {
+      const loadImage = async () => {
+        if (!loadingImage && dj.dj_name) {
+          setLoadingImage(true);
+          const image = await fetchArtistImage(dj.dj_name);
+          if (image) setDjImage(image);
+          setLoadingImage(false);
+        }
+      };
+      loadImage();
+    }, [dj.dj_name, loadingImage]);
+
+    return (
+      <motion.div
+        key={dj.dj_id}
+        className="card-artist"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: index * 0.03 }}
+      >
+        <div className="card-artist-img-wrap">
+          {djImage ? (
+            <img src={djImage} alt={dj.dj_name} className="card-artist-img" loading="lazy" />
+          ) : (
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: getDJGradient(dj.dj_id),
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              <span style={{ fontSize: '2.5rem', fontWeight: 800, color: 'rgba(255,255,255,0.12)' }}>
+                {(dj.dj_name || '?')[0].toUpperCase()}
+              </span>
+            </div>
+          )}
+          {/* Badge overlay */}
+          <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 2 }}>
+            <span className="badge" style={{ fontSize: '0.6rem' }}>
+              {dj.city || 'Ireland'}
+            </span>
+          </div>
+        </div>
+        <div className="card-artist-body">
+          <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.2rem' }}>
+            {dj.dj_name}
+          </h3>
+          <p className="line-clamp-1" style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.4rem' }}>
+            {dj.genres || 'Various genres'}
+          </p>
+          <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+            {dj.numeric_fee && (
+              <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>
+                {dj.currency || 'EUR'} {dj.numeric_fee}
+              </span>
+            )}
+            {dj.instagram && (
+              <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>IG</span>
+            )}
+            {dj.soundcloud && (
+              <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>SC</span>
+            )}
+            <button
+              onClick={() => setShowMixcloud(!showMixcloud)}
+              className="chip"
+              style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem', cursor: 'pointer', background: showMixcloud ? 'rgba(82,177,252,0.2)' : '', borderColor: showMixcloud ? '#52B1FC' : '' }}
+              title="Listen on Mixcloud"
+            >
+              Mix
+            </button>
+          </div>
+          {showMixcloud && (
+            <div style={{ marginBottom: '0.5rem' }}>
+              <MixcloudPlayer artistName={dj.dj_name} height={60} />
+            </div>
+          )}
+          {isAdmin && (
+            <div style={{ display: 'flex', gap: '0.35rem' }}>
+              <button onClick={() => openModal(dj)} className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: '0.75rem' }}>Edit</button>
+              <button onClick={() => handleDeleteDJ(dj.dj_id)} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6V20a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2V6"/></svg>
+              </button>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -180,60 +275,7 @@ const DJs = () => {
           ) : (
             <div className="grid-events">
               {djs.map((dj, index) => (
-                <motion.div
-                  key={dj.dj_id}
-                  className="card-artist"
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: index * 0.03 }}
-                >
-                  <div className="card-artist-img-wrap">
-                    <div style={{
-                      position: 'absolute', inset: 0,
-                      background: getDJGradient(dj.dj_id),
-                      display: 'flex', alignItems: 'center', justifyContent: 'center'
-                    }}>
-                      <span style={{ fontSize: '2.5rem', fontWeight: 800, color: 'rgba(255,255,255,0.12)' }}>
-                        {(dj.dj_name || '?')[0].toUpperCase()}
-                      </span>
-                    </div>
-                    {/* Badge overlay */}
-                    <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 2 }}>
-                      <span className="badge" style={{ fontSize: '0.6rem' }}>
-                        {dj.city || 'Ireland'}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="card-artist-body">
-                    <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.2rem' }}>
-                      {dj.dj_name}
-                    </h3>
-                    <p className="line-clamp-1" style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.4rem' }}>
-                      {dj.genres || 'Various genres'}
-                    </p>
-                    <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                      {dj.numeric_fee && (
-                        <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>
-                          {dj.currency || 'EUR'} {dj.numeric_fee}
-                        </span>
-                      )}
-                      {dj.instagram && (
-                        <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>IG</span>
-                      )}
-                      {dj.soundcloud && (
-                        <span className="chip" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>SC</span>
-                      )}
-                    </div>
-                    {isAdmin && (
-                      <div style={{ display: 'flex', gap: '0.35rem' }}>
-                        <button onClick={() => openModal(dj)} className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: '0.75rem' }}>Edit</button>
-                        <button onClick={() => handleDeleteDJ(dj.dj_id)} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6V20a2,2,0,0,1-2,2H7a2,2,0,0,1-2-2V6M8,6V4a2,2,0,0,1,2-2h4a2,2,0,0,1,2,2V6"/></svg>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
+                <DJCard key={dj.dj_id} dj={dj} index={index} />
               ))}
             </div>
           )}
@@ -245,8 +287,8 @@ const DJs = () => {
         <section>
           {performersLoading ? (
             <div className="grid-events">
-              {[...Array(6)].map((_, i) => (
-                <div key={i} className="skeleton" style={{ height: 260, borderRadius: 14 }} />
+              {[...Array(12)].map((_, i) => (
+                <div key={i} className="skeleton" style={{ height: 320, borderRadius: 14 }} />
               ))}
             </div>
           ) : performers.length === 0 ? (
@@ -259,57 +301,83 @@ const DJs = () => {
               <button className="btn btn-primary btn-sm" onClick={loadPerformers}>Discover artists</button>
             </div>
           ) : (
-            <div className="grid-events">
-              {performers.map((performer, index) => (
-                <motion.div
-                  key={`${performer.name}-${index}`}
-                  className="card-artist"
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: index * 0.03 }}
-                >
-                  <div className="card-artist-img-wrap">
-                    {performer.image ? (
-                      <img src={performer.image} alt={performer.name} className="card-artist-img" loading="lazy" />
-                    ) : (
-                      <div style={{
-                        position: 'absolute', inset: 0,
-                        background: `linear-gradient(135deg, hsl(${(index * 43) % 360}, 35%, 16%), hsl(${(index * 89) % 360}, 20%, 10%))`,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                      }}>
-                        <span style={{ fontSize: '2.5rem', fontWeight: 800, color: 'rgba(255,255,255,0.12)' }}>
-                          {(performer.name || '?')[0].toUpperCase()}
+            <div className="grid-events" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
+              {performers.map((performer, index) => {
+                const [showMixcloud, setShowMixcloud] = useState(false);
+
+                return (
+                  <motion.div
+                    key={`${performer.name}-${index}`}
+                    className="card-artist"
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: index * 0.02 }}
+                  >
+                    <div className="card-artist-img-wrap" style={{ paddingTop: '100%' }}>
+                      {performer.image ? (
+                        <img src={performer.image} alt={performer.name} className="card-artist-img" loading="lazy" />
+                      ) : (
+                        <div style={{
+                          position: 'absolute', inset: 0,
+                          background: `linear-gradient(135deg, hsl(${(index * 43) % 360}, 35%, 16%), hsl(${(index * 89) % 360}, 20%, 10%))`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}>
+                          <span style={{ fontSize: '3rem', fontWeight: 800, color: 'rgba(255,255,255,0.12)' }}>
+                            {(performer.name || '?')[0].toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                      <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
+                        <span className={`badge ${performer.source === 'spotify' ? '' : performer.source === 'mixcloud' ? '' : 'badge-sky'}`}
+                          style={{ fontSize: '0.6rem',
+                            ...(performer.source === 'spotify' ? { background: 'rgba(29,185,84,0.2)', color: '#1DB954' } : {}),
+                            ...(performer.source === 'mixcloud' ? { background: 'rgba(82,177,252,0.2)', color: '#52B1FC' } : {})
+                          }}>
+                          {performer.source}
                         </span>
                       </div>
-                    )}
-                    <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
-                      <span className={`badge ${performer.source === 'spotify' ? '' : performer.source === 'mixcloud' ? '' : 'badge-sky'}`}
-                        style={{ fontSize: '0.6rem',
-                          ...(performer.source === 'spotify' ? { background: 'rgba(29,185,84,0.2)', color: '#1DB954' } : {}),
-                          ...(performer.source === 'mixcloud' ? { background: 'rgba(82,177,252,0.2)', color: '#52B1FC' } : {})
-                        }}>
-                        {performer.source}
-                      </span>
                     </div>
-                  </div>
-                  <div className="card-artist-body">
-                    <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: '0.2rem' }}>
-                      {performer.name}
-                    </h3>
-                    {performer.genres && (
-                      <p className="line-clamp-1" style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-                        {Array.isArray(performer.genres) ? performer.genres.join(', ') : performer.genres}
-                      </p>
-                    )}
-                    {(performer.spotifyUrl || performer.mixcloudUrl) && (
-                      <a href={performer.spotifyUrl || performer.mixcloudUrl} target="_blank" rel="noopener noreferrer"
-                        style={{ fontSize: '0.7rem', color: performer.spotifyUrl ? '#1DB954' : '#52B1FC', marginTop: '0.25rem', display: 'inline-block' }}>
-                        View on {performer.spotifyUrl ? 'Spotify' : 'Mixcloud'} ↗
-                      </a>
-                    )}
-                  </div>
-                </motion.div>
-              ))}
+                    <div className="card-artist-body">
+                      <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.3rem' }}>
+                        {performer.name}
+                      </h3>
+                      {performer.genres && (
+                        <p className="line-clamp-2" style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem', minHeight: '2.4rem' }}>
+                          {Array.isArray(performer.genres) ? performer.genres.slice(0, 3).join(', ') : performer.genres}
+                        </p>
+                      )}
+                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                        {(performer.spotifyUrl || performer.source === 'spotify') && (
+                          <a href={performer.spotifyUrl} target="_blank" rel="noopener noreferrer"
+                            className="chip" style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(29,185,84,0.15)', borderColor: '#1DB954', color: '#1DB954', textDecoration: 'none' }}>
+                            Spotify ↗
+                          </a>
+                        )}
+                        {(performer.mixcloudUrl || performer.source === 'mixcloud') && (
+                          <>
+                            <a href={performer.mixcloudUrl} target="_blank" rel="noopener noreferrer"
+                              className="chip" style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(82,177,252,0.15)', borderColor: '#52B1FC', color: '#52B1FC', textDecoration: 'none' }}>
+                              Mixcloud ↗
+                            </a>
+                            <button
+                              onClick={() => setShowMixcloud(!showMixcloud)}
+                              className="chip"
+                              style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', cursor: 'pointer', background: showMixcloud ? 'rgba(82,177,252,0.2)' : '', borderColor: showMixcloud ? '#52B1FC' : '' }}
+                            >
+                              {showMixcloud ? 'Hide' : 'Play'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      {showMixcloud && (
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <MixcloudPlayer artistName={performer.name} height={80} />
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </section>
