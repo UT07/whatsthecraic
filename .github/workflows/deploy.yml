@@ -30,6 +30,12 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push Docker images
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -37,21 +43,21 @@ jobs:
         run: |
           SERVICES=("auth-service" "events-service" "dj-service" "venue-service" "aggregator-service" "ml-service")
           mkdir -p ml-service/models
-          echo "Building images with tag: $IMAGE_TAG"
+          echo "Building multi-platform images with tag: $IMAGE_TAG"
           for SVC in "${SERVICES[@]}"; do
-            echo "Building $SVC..."
-            docker build \
+            echo "Building $SVC for linux/amd64 and linux/arm64..."
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
               --label "git.commit=$IMAGE_TAG" \
               --label "git.branch=${GITHUB_REF#refs/heads/}" \
               --label "build.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               -t $ECR_REGISTRY/whatsthecraic/$SVC:$IMAGE_TAG \
               -t $ECR_REGISTRY/whatsthecraic/$SVC:latest \
+              --push \
               ./$SVC
-            docker push $ECR_REGISTRY/whatsthecraic/$SVC:$IMAGE_TAG
-            docker push $ECR_REGISTRY/whatsthecraic/$SVC:latest
             echo "$SVC pushed successfully"
           done
-          echo "All images built and pushed with tag: $IMAGE_TAG"
+          echo "All multi-platform images built and pushed with tag: $IMAGE_TAG"
 
       # IMPORTANT: EC2_INSTANCE_ID secret must be set to: i-077f139e329506bf5
       # Update in GitHub repo settings: Settings > Secrets and variables > Actions
