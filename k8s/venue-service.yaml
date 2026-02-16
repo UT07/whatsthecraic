@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: venue-service
+  namespace: whatsthecraic
+  labels:
+    app: venue-service
+    app.kubernetes.io/part-of: whatsthecraic
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: venue-service
+  template:
+    metadata:
+      labels:
+        app: venue-service
+    spec:
+      serviceAccountName: whatsthecraic-sa
+      containers:
+        - name: venue-service
+          image: 385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/venue-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 4001
+              name: http
+          envFrom:
+            - configMapRef:
+                name: whatsthecraic-config
+            - secretRef:
+                name: whatsthecraic-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4001
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 192Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: venue-service
+  namespace: whatsthecraic
+  labels:
+    app: venue-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4001
+      targetPort: 4001
+      protocol: TCP
+      name: http
+  selector:
+    app: venue-service

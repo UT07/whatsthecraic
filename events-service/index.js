@@ -117,7 +117,7 @@ const ensureEventsSchema = async () => {
         KEY user_hidden_events_event_idx (event_id),
         CONSTRAINT fk_hidden_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         CONSTRAINT fk_hidden_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`
     );
     await pool.query(
       `CREATE TABLE IF NOT EXISTS user_alerts (
@@ -131,7 +131,7 @@ const ensureEventsSchema = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX user_alerts_user_idx (user_id),
         CONSTRAINT fk_user_alerts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`
     );
     await pool.query(
       `CREATE TABLE IF NOT EXISTS event_plans (
@@ -151,7 +151,7 @@ const ensureEventsSchema = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX event_plans_user_idx (user_id),
         CONSTRAINT fk_event_plans_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`
     );
     await pool.query(
       `CREATE TABLE IF NOT EXISTS event_plan_shortlists (
@@ -162,7 +162,7 @@ const ensureEventsSchema = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY unique_plan_item (plan_id, item_type, item_id),
         CONSTRAINT fk_plan_shortlist_plan FOREIGN KEY (plan_id) REFERENCES event_plans(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`
     );
     await pool.query(
       `CREATE TABLE IF NOT EXISTS contact_requests (
@@ -178,7 +178,7 @@ const ensureEventsSchema = async () => {
         INDEX contact_requests_user_idx (user_id),
         CONSTRAINT fk_contact_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         CONSTRAINT fk_contact_plan FOREIGN KEY (plan_id) REFERENCES event_plans(id) ON DELETE SET NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`
     );
   } catch (err) {
     console.error('[events-service] Schema check failed:', err.message);

@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-service
+  namespace: whatsthecraic
+  labels:
+    app: ml-service
+    app.kubernetes.io/part-of: whatsthecraic
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: ml-service
+  template:
+    metadata:
+      labels:
+        app: ml-service
+    spec:
+      serviceAccountName: whatsthecraic-sa
+      containers:
+        - name: ml-service
+          image: 385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 4004
+              name: http
+          envFrom:
+            - configMapRef:
+                name: whatsthecraic-config
+            - secretRef:
+                name: whatsthecraic-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4004
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4004
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: ml-models
+              mountPath: /app/models
+            - name: ml-data
+              mountPath: /app/data
+      volumes:
+        - name: ml-models
+          emptyDir: {}
+        - name: ml-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-service
+  namespace: whatsthecraic
+  labels:
+    app: ml-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4004
+      targetPort: 4004
+      protocol: TCP
+      name: http
+  selector:
+    app: ml-service

@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dj-service
+  namespace: whatsthecraic
+  labels:
+    app: dj-service
+    app.kubernetes.io/part-of: whatsthecraic
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: dj-service
+  template:
+    metadata:
+      labels:
+        app: dj-service
+    spec:
+      serviceAccountName: whatsthecraic-sa
+      containers:
+        - name: dj-service
+          image: 385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/dj-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 4002
+              name: http
+          envFrom:
+            - configMapRef:
+                name: whatsthecraic-config
+            - secretRef:
+                name: whatsthecraic-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4002
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 192Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dj-service
+  namespace: whatsthecraic
+  labels:
+    app: dj-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4002
+      targetPort: 4002
+      protocol: TCP
+      name: http
+  selector:
+    app: dj-service

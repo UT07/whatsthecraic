@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: whatsthecraic
+  labels:
+    app.kubernetes.io/name: whatsthecraic
+    app.kubernetes.io/part-of: whatsthecraic
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: whatsthecraic-sa
+  namespace: whatsthecraic
+  labels:
+    app.kubernetes.io/part-of: whatsthecraic
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: whatsthecraic-role
+  namespace: whatsthecraic
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: whatsthecraic-rolebinding
+  namespace: whatsthecraic
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: whatsthecraic-role
+subjects:
+  - kind: ServiceAccount
+    name: whatsthecraic-sa
+    namespace: whatsthecraic

@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: whatsthecraic-config
+  namespace: whatsthecraic
+  labels:
+    app.kubernetes.io/part-of: whatsthecraic
+data:
+  # Database (non-sensitive)
+  DB_PORT: "3306"
+  DB_NAME: "gigsdb"
+
+  # Service discovery (K8s internal DNS)
+  VENUE_SERVICE_URL: "http://venue-service.whatsthecraic.svc.cluster.local:4001"
+  DJ_SERVICE_URL: "http://dj-service.whatsthecraic.svc.cluster.local:4002"
+  LOCAL_EVENTS_URL: "http://events-service.whatsthecraic.svc.cluster.local:4003"
+  ML_SERVICE_URL: "http://ml-service.whatsthecraic.svc.cluster.local:4004"
+
+  # Service ports
+  AGGREGATOR_PORT: "4000"
+  DJ_SERVICE_PORT: "4002"
+  EVENTS_SERVICE_PORT: "4003"
+  VENUE_SERVICE_PORT: "4001"
+  AUTH_SERVICE_PORT: "3001"
+  ML_SERVICE_PORT: "4004"
+
+  # Ticketmaster (non-sensitive config)
+  TICKETMASTER_COUNTRY_CODE: "IE"
+
+  # Bandsintown config
+  BANDSINTOWN_SEED_ARTISTS: "Hozier,Fontaines D.C.,The Coronas,Dermot Kennedy,Picture This,Imelda May,Pillow Queens,The Academic,Kodaline,Gavin James,Inhaler,Wild Youth,Niall Horan,The Script,Cian Ducrot"
+  BANDSINTOWN_MAX_ARTISTS: "15"
+  BANDSINTOWN_MAX_EVENTS: "500"
+  BANDSINTOWN_ALLOW_ANY_ARTIST: "false"
+  BANDSINTOWN_USER_SYNC_HOURS: "12"
+  BANDSINTOWN_USER_MAX_ARTISTS: "10"
+
+  # Ingestion
+  INGESTION_ENABLED: "true"
+  INGESTION_STALE_HOURS: "6"
+  INGESTION_DEFAULT_CITY: "Dublin"
+  INGESTION_MAX_PAGES: "5"
+
+  # Dice/Apify
+  DICE_APIFY_ENABLED: "false"
+
+  # Mixcloud
+  MIXCLOUD_ENABLED: "true"
+
+  # Rate limiting
+  RATE_LIMIT_WINDOW_MS: "60000"
+  RATE_LIMIT_MAX: "60"
+  TRUST_PROXY: "true"
+
+  # ML / Monitoring
+  AWS_REGION: "eu-west-1"
+  ENABLE_CLOUDWATCH: "true"
+  ENVIRONMENT: "production"
+  MODEL_VERSION: "v1.0.0"
