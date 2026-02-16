@@ -27,29 +27,45 @@ const BetterHeatMap = ({ data, xLabels, width = 600, height = 150 }) => {
   // Determine the maximum value for color scaling
   const maxVal = Math.max(1, ...validData.map(v => Math.max(0, Number(v) || 0)));
 
-  return (
-    <XYPlot
-      xType="ordinal"
-      width={width}
-      height={height}
-      margin={{ left: 50, right: 50, top: 10, bottom: 50 }}
-    >
-      <XAxis />
-      <YAxis hideLine hideTicks />
-      <HeatmapSeries
-        className="heatmap-series-example"
-        data={cells}
-        colorRange={['#e0f3db', '#43a2ca']}
-        style={{ stroke: '#fff', strokeWidth: '2px' }}
-      />
-      <LabelSeries
-        data={cells.map(cell => ({ ...cell, label: String(cell.value) }))}
-        labelAnchorX="middle"
-        labelAnchorY="baseline"
-        style={{ fontSize: '14px', fill: '#000' }}
-      />
-    </XYPlot>
-  );
+  // Final safety check - ensure cells is not empty
+  if (!cells || cells.length === 0) {
+    return null;
+  }
+
+  // Ensure all cells have valid x values for XAxis
+  const hasValidX = cells.every(cell => cell.x != null && String(cell.x).trim() !== '');
+  if (!hasValidX) {
+    return null;
+  }
+
+  try {
+    return (
+      <XYPlot
+        xType="ordinal"
+        width={width}
+        height={height}
+        margin={{ left: 50, right: 50, top: 10, bottom: 50 }}
+      >
+        <XAxis />
+        <YAxis hideLine hideTicks />
+        <HeatmapSeries
+          className="heatmap-series-example"
+          data={cells}
+          colorRange={['#e0f3db', '#43a2ca']}
+          style={{ stroke: '#fff', strokeWidth: '2px' }}
+        />
+        <LabelSeries
+          data={cells.map(cell => ({ ...cell, label: String(cell.value) }))}
+          labelAnchorX="middle"
+          labelAnchorY="baseline"
+          style={{ fontSize: '14px', fill: '#000' }}
+        />
+      </XYPlot>
+    );
+  } catch (error) {
+    console.warn('BetterHeatMap render error:', error);
+    return null;
+  }
 };
 
 export default BetterHeatMap;
