@@ -48,12 +48,14 @@
 - **Blockers:** Wave 1 must complete first
 
 ### Admin & DevOps Agent (worktree-admin-devops)
-- [ ] Admin ML dashboard complete
-- [ ] CI/CD updated
-- [ ] Deployment scripts ready
-- **Status:** Blocked - waiting for Wave 1
-- **Dependencies:** mlAPI.js from ML Agent
-- **Blockers:** Wave 1 must complete first
+- [x] Admin ML dashboard complete (`/admin/ml` route with role-based access)
+- [x] CI/CD updated (EC2_INSTANCE_ID documented)
+- [x] Deployment scripts ready (`deploy-ml-service.sh`, `deploy-frontend.sh`)
+- [x] Deployment runbook created (`DEPLOYMENT_RUNBOOK.md`)
+- [x] ML retraining cron job manifest ready (`ml-retrain-cronjob.yaml`)
+- **Status:** Admin & DevOps Ready ✅
+- **Contract Exposed:** AdminML page, deployment scripts, comprehensive runbook
+- **Blockers:** NONE - Scripts need to be made executable (chmod +x)
 
 ---
 

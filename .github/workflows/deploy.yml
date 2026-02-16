@@ -45,6 +45,8 @@ jobs:
             echo "$SVC pushed successfully"
           done
 
+      # IMPORTANT: EC2_INSTANCE_ID secret must be set to: i-077f139e329506bf5
+      # Update in GitHub repo settings: Settings > Secrets and variables > Actions
       - name: Deploy to k3s via SSM
         env:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}

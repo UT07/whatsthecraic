@@ -9,20 +9,24 @@ import Venues from './pages/Venues';
 import CombinedGigs from './pages/CombinedGigs';
 import Organizer from './pages/Organizer';
 import Preferences from './pages/Preferences';
+import AdminML from './pages/AdminML';
 import Login from './pages/Auth/Login';
 import Signup from './pages/Auth/Signup';
 import ForgotPassword from './pages/Auth/ForgotPassword';
-import { getToken } from './services/apiClient';
+import { getToken, getUser } from './services/apiClient';
 
 const getCurrentUser = () => getToken();
 
 const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     const token = getCurrentUser();
+    const user = getUser();
     setIsAuthenticated(!!token);
+    setIsAdmin(user?.role === 'admin');
     setAuthChecked(true);
   }, []);
 
@@ -53,6 +57,7 @@ const App = () => {
                 <Route path="/discover" element={<CombinedGigs />} />
                 <Route path="/organizer" element={<Organizer />} />
                 <Route path="/preferences" element={<Preferences />} />
+                {isAdmin && <Route path="/admin/ml" element={<AdminML />} />}
                 <Route path="*" element={<Navigate to="/dashboard" />} />
               </>
             ) : (
