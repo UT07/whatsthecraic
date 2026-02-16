@@ -73,18 +73,77 @@ const pool = mysql.createPool({
   user: DB_USER,
   password: DB_PASSWORD,
   database: DB_NAME,
+  connectTimeout: 10000,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
 });
 
+const DB_CONNECTION_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'PROTOCOL_CONNECTION_LOST',
+  'ER_ACCESS_DENIED_ERROR',
+  'ER_BAD_DB_ERROR',
+  'ER_CON_COUNT_ERROR'
+]);
+
+const DB_SCHEMA_ERROR_CODES = new Set([
+  'ER_NO_SUCH_TABLE',
+  'ER_BAD_FIELD_ERROR',
+  'ER_PARSE_ERROR'
+]);
+
+const isDatabaseConnectionError = (err) => Boolean(err?.code && DB_CONNECTION_ERROR_CODES.has(err.code));
+const isDatabaseSchemaError = (err) => Boolean(err?.code && DB_SCHEMA_ERROR_CODES.has(err.code));
+
+const handleRouteError = (res, err, fallbackMessage = 'Server error') => {
+  if (isDatabaseConnectionError(err)) {
+    return sendError(res, 503, 'database_unavailable', 'Database is currently unavailable');
+  }
+  if (isDatabaseSchemaError(err)) {
+    return sendError(res, 500, 'database_schema_error', 'Database schema is out of date');
+  }
+  if (typeof err?.status === 'number') {
+    return sendError(res, err.status, 'internal_error', err.message || fallbackMessage);
+  }
+  return sendError(res, 500, 'internal_error', fallbackMessage);
+};
+
+const asyncHandler = (handler) => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
+
+const ensureColumn = async (tableName, columnName, columnDefinition) => {
+  try {
+    const [rows] = await pool.query(`SHOW COLUMNS FROM \`${tableName}\` LIKE ?`, [columnName]);
+    if (rows.length === 0) {
+      await pool.query(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${columnName}\` ${columnDefinition}`);
+      console.log(`[${SERVICE_NAME}] Added ${tableName}.${columnName} column`);
+    }
+  } catch (err) {
+    if (err.code === 'ER_NO_SUCH_TABLE') {
+      return;
+    }
+    throw err;
+  }
+};
+
 const ensureAuthSchema = async () => {
   try {
-    const [rows] = await pool.query("SHOW COLUMNS FROM users LIKE 'role'");
-    if (rows.length === 0) {
-      await pool.query("ALTER TABLE users ADD COLUMN role VARCHAR(32) DEFAULT 'user'");
-      console.log('[auth-service] Added users.role column');
-    }
+    await ensureColumn('users', 'role', "VARCHAR(32) DEFAULT 'user'");
+    await ensureColumn('user_preferences', 'preferred_venues', 'JSON DEFAULT NULL');
+    await ensureColumn('user_preferences', 'preferred_djs', 'JSON DEFAULT NULL');
+    await ensureColumn('user_preferences', 'budget_max', 'DECIMAL(10,2) DEFAULT NULL');
+    await ensureColumn('user_preferences', 'radius_km', 'INT DEFAULT NULL');
+    await ensureColumn('user_preferences', 'night_preferences', 'JSON DEFAULT NULL');
+    await ensureColumn('user_spotify', 'top_artists', 'JSON DEFAULT NULL');
+    await ensureColumn('user_spotify', 'top_genres', 'JSON DEFAULT NULL');
+    await ensureColumn('user_spotify', 'last_synced_at', 'TIMESTAMP NULL DEFAULT NULL');
   } catch (err) {
     if (err.code !== 'ER_NO_SUCH_TABLE') {
       console.error('[auth-service] Schema check failed:', err.message);
@@ -461,7 +520,7 @@ app.post('/auth/signup', authLimiter, async (req, res) => {
     return res.status(201).json({ message: 'User created successfully' });
   } catch (err) {
     console.error(err);
-    return sendError(res, 500, 'internal_error', 'Server error');
+    return handleRouteError(res, err, 'Server error');
   }
 });
 
@@ -504,7 +563,7 @@ app.post('/auth/login', authLimiter, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return sendError(res, 500, 'internal_error', 'Server error');
+    return handleRouteError(res, err, 'Server error');
   }
 });
 
@@ -590,14 +649,17 @@ app.get('/auth/spotify/callback', async (req, res) => {
     return res.json({ linked: true, spotify_user_id: me.id });
   } catch (err) {
     console.error('Spotify callback error:', err.message);
-    return sendError(res, err.status || 500, 'spotify_error', err.message);
+    if (isDatabaseConnectionError(err)) {
+      return sendError(res, 503, 'database_unavailable', 'Database is currently unavailable');
+    }
+    return sendError(res, err.status || 500, 'spotify_error', err.message || 'Spotify error');
   }
 });
 
-app.get('/auth/spotify/status', requireAuth, async (req, res) => {
+app.get('/auth/spotify/status', requireAuth, asyncHandler(async (req, res) => {
   const row = await getSpotifyTokens(req.user.user_id);
   return res.json({ linked: Boolean(row), last_synced_at: row?.last_synced_at || null });
-});
+}));
 
 app.post('/auth/spotify/sync', requireAuth, async (req, res) => {
   try {
@@ -608,11 +670,14 @@ app.post('/auth/spotify/sync', requireAuth, async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error('Spotify sync error:', err.message);
-    return sendError(res, err.status || 500, 'spotify_error', err.message);
+    if (isDatabaseConnectionError(err)) {
+      return sendError(res, 503, 'database_unavailable', 'Database is currently unavailable');
+    }
+    return sendError(res, err.status || 500, 'spotify_error', err.message || 'Spotify error');
   }
 });
 
-app.get('/auth/spotify/profile', requireAuth, async (req, res) => {
+app.get('/auth/spotify/profile', requireAuth, asyncHandler(async (req, res) => {
   const [rows] = await pool.query(
     'SELECT top_artists, top_genres, last_synced_at FROM user_spotify WHERE user_id = ?',
     [req.user.user_id]
@@ -634,9 +699,9 @@ app.get('/auth/spotify/profile', requireAuth, async (req, res) => {
     top_genres: parseJson(row.top_genres),
     last_synced_at: row.last_synced_at
   });
-});
+}));
 
-app.get('/auth/preferences', requireAuth, async (req, res) => {
+app.get('/auth/preferences', requireAuth, asyncHandler(async (req, res) => {
   const [rows] = await pool.query(
     `SELECT preferred_genres, preferred_artists, preferred_cities, preferred_venues,
             preferred_djs, budget_max, radius_km, night_preferences, updated_at
@@ -676,9 +741,9 @@ app.get('/auth/preferences', requireAuth, async (req, res) => {
     night_preferences: parseJson(row.night_preferences),
     updated_at: row.updated_at
   });
-});
+}));
 
-app.post('/auth/preferences', requireAuth, async (req, res) => {
+app.post('/auth/preferences', requireAuth, asyncHandler(async (req, res) => {
   const schema = z.object({
     preferred_genres: z.array(z.string()).optional(),
     preferred_artists: z.array(z.string()).optional(),
@@ -729,7 +794,7 @@ app.post('/auth/preferences', requireAuth, async (req, res) => {
     ]
   );
   return res.status(200).json({ saved: true });
-});
+}));
 
 // A simple health check endpoint
 app.get('/', (req, res) => {
@@ -738,6 +803,10 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
+app.get('/ready', asyncHandler(async (req, res) => {
+  await pool.query('SELECT 1');
+  return res.status(200).json({ status: 'ok' });
+}));
 
 // Password reset endpoint
 app.post('/auth/reset-password', async (req, res) => {
@@ -756,13 +825,13 @@ app.post('/auth/reset-password', async (req, res) => {
     return res.status(200).json({ success: true, message: 'Password has been reset successfully' });
   } catch (err) {
     console.error('Password reset error:', err);
-    return sendError(res, 500, 'internal_error', 'Failed to reset password');
+    return handleRouteError(res, err, 'Failed to reset password');
   }
 });
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
-  return sendError(res, 500, 'internal_error', 'Server error');
+  return handleRouteError(res, err, 'Server error');
 });
 
 // Start the server
