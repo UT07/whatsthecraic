@@ -45,11 +45,21 @@
 - **Blockers:** Build verification requires npm access
 
 ### Visual & Media Agent (worktree-visual-media)
-- [ ] Image utilities complete
-- [ ] Mixcloud integration complete
-- **Status:** Blocked - waiting for Wave 1
-- **Contract Exposed:** None yet
-- **Blockers:** Wave 1 must complete first
+- [x] Image utilities complete (imageUtils.js enhanced)
+- [x] Spotify artist image fetching added
+- [x] Mixcloud artist image fetching added
+- [x] Image caching strategy implemented (24hr TTL in sessionStorage)
+- [x] MixcloudPlayer component created
+- [x] Rich images on event cards (CombinedGigs.jsx)
+- [x] Rich images on DJ cards (DJs.jsx)
+- [x] Rich images on Dashboard upcoming events
+- [x] Mixcloud player on DJ detail pages
+- [x] Discovered performers tab enhanced with larger images
+- **Status:** Visual & Media Complete ✅
+- **Contract Exposed:**
+  - `imageUtils.js`: fetchSpotifyArtistImage(), fetchMixcloudArtistImage(), fetchArtistImage(), imageCacheStrategy()
+  - `MixcloudPlayer.jsx`: Reusable component for Mixcloud embeds
+- **Blockers:** None
 
 ### Admin & DevOps Agent (worktree-admin-devops)
 - [x] Admin ML dashboard complete (`/admin/ml` route with role-based access)

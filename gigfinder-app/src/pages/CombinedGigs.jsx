@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import eventsAPI from '../services/eventsAPI';
 import { getToken } from '../services/apiClient';
-import { getBestImage } from '../utils/imageUtils';
+import { getBestImage, fetchArtistImage } from '../utils/imageUtils';
 
 const formatDate = (iso) => {
   if (!iso) return 'TBA';
@@ -57,7 +57,26 @@ const MatchBadge = ({ reasons, score }) => {
 };
 
 const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
-  const image = getBestImage(event.images, 'card', 400);
+  const [image, setImage] = useState(getBestImage(event.images, 'card', 400));
+  const [loadingImage, setLoadingImage] = useState(false);
+
+  // Fetch artist image if event has no image
+  useEffect(() => {
+    const loadArtistImage = async () => {
+      if (!image && event.title && !loadingImage) {
+        setLoadingImage(true);
+        // Extract artist name from event title (usually first part before @ or - or at)
+        const artistName = event.title.split(/[@\-–]|at\s/i)[0].trim();
+        const artistImage = await fetchArtistImage(artistName);
+        if (artistImage) {
+          setImage(artistImage);
+        }
+        setLoadingImage(false);
+      }
+    };
+    loadArtistImage();
+  }, [event.title, image, loadingImage]);
+
   return (
     <motion.article
       className="card-event"

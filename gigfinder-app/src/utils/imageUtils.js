@@ -58,3 +58,137 @@ export const getImageSrcSet = (images) => {
     .map(img => `${img.url} ${img.width}w`)
     .join(', ');
 };
+
+/**
+ * Image cache strategy - sessionStorage with 24hr TTL
+ * @param {string} key - Cache key
+ * @param {string|null} value - Value to store (null to get)
+ * @returns {string|null} Cached value or null
+ */
+export const imageCacheStrategy = (key, value = null) => {
+  const TTL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+  if (value !== null) {
+    // Store with timestamp
+    const cacheItem = {
+      url: value,
+      timestamp: Date.now()
+    };
+    try {
+      sessionStorage.setItem(key, JSON.stringify(cacheItem));
+    } catch (e) {
+      // Silent fail if storage is full
+      console.warn('SessionStorage full, unable to cache image:', key);
+    }
+    return value;
+  } else {
+    // Retrieve and check TTL
+    try {
+      const cached = sessionStorage.getItem(key);
+      if (!cached) return null;
+
+      const cacheItem = JSON.parse(cached);
+      const age = Date.now() - cacheItem.timestamp;
+
+      if (age > TTL) {
+        // Expired, remove it
+        sessionStorage.removeItem(key);
+        return null;
+      }
+
+      return cacheItem.url;
+    } catch (e) {
+      return null;
+    }
+  }
+};
+
+/**
+ * Fetch artist image from Spotify API
+ * @param {string} artistName - Name of the artist
+ * @returns {Promise<string|null>} Image URL or null
+ */
+export const fetchSpotifyArtistImage = async (artistName) => {
+  if (!artistName || typeof artistName !== 'string') return null;
+
+  const cacheKey = `img_spotify_${artistName.toLowerCase().trim()}`;
+  const cached = imageCacheStrategy(cacheKey);
+  if (cached) return cached;
+
+  try {
+    // Use Spotify Web API search endpoint
+    // Note: This requires a backend proxy or Spotify access token
+    // For now, we'll use a fallback approach via our backend
+    const response = await fetch(
+      `${process.env.REACT_APP_API_BASE || 'https://api.whatsthecraic.run.place'}/performers/search?q=${encodeURIComponent(artistName)}&source=spotify&limit=1`
+    );
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const imageUrl = data.performers?.[0]?.image || null;
+
+    if (imageUrl) {
+      imageCacheStrategy(cacheKey, imageUrl);
+    }
+
+    return imageUrl;
+  } catch (error) {
+    console.warn('Failed to fetch Spotify image for:', artistName, error);
+    return null;
+  }
+};
+
+/**
+ * Fetch artist image from Mixcloud API
+ * @param {string} artistName - Name of the artist
+ * @returns {Promise<string|null>} Image URL or null
+ */
+export const fetchMixcloudArtistImage = async (artistName) => {
+  if (!artistName || typeof artistName !== 'string') return null;
+
+  const cacheKey = `img_mixcloud_${artistName.toLowerCase().trim()}`;
+  const cached = imageCacheStrategy(cacheKey);
+  if (cached) return cached;
+
+  try {
+    // Use Mixcloud API search
+    // Mixcloud API: https://api.mixcloud.com/search/?q=<query>&type=cloudcast
+    const response = await fetch(
+      `https://api.mixcloud.com/search/?q=${encodeURIComponent(artistName)}&type=user&limit=1`
+    );
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const imageUrl = data.data?.[0]?.pictures?.large || data.data?.[0]?.pictures?.medium || null;
+
+    if (imageUrl) {
+      imageCacheStrategy(cacheKey, imageUrl);
+    }
+
+    return imageUrl;
+  } catch (error) {
+    console.warn('Failed to fetch Mixcloud image for:', artistName, error);
+    return null;
+  }
+};
+
+/**
+ * Fetch best available artist image (tries multiple sources)
+ * @param {string} artistName - Name of the artist
+ * @returns {Promise<string|null>} Image URL or null
+ */
+export const fetchArtistImage = async (artistName) => {
+  if (!artistName) return null;
+
+  // Try Spotify first (usually better quality)
+  let imageUrl = await fetchSpotifyArtistImage(artistName);
+  if (imageUrl) return imageUrl;
+
+  // Fallback to Mixcloud
+  imageUrl = await fetchMixcloudArtistImage(artistName);
+  if (imageUrl) return imageUrl;
+
+  return null;
+};

@@ -7,7 +7,7 @@ import venueAPI from '../services/venueAPI';
 import authAPI from '../services/authAPI';
 import mlAPI from '../services/mlAPI';
 import { getToken } from '../services/apiClient';
-import { getBestImage } from '../utils/imageUtils';
+import { getBestImage, fetchArtistImage } from '../utils/imageUtils';
 import { ExplainabilityModal, TasteProfilePanel, FeedbackButtons, EventDensityHeatMap } from '../components/ml';
 
 const formatDate = (iso) => {
@@ -198,6 +198,51 @@ const SmallHeroCard = ({ event }) => {
         <span style={{ fontSize: '0.75rem', color: 'var(--emerald)' }}>{formatDate(event.start_time)}</span>
       </div>
     </Link>
+  );
+};
+
+/* Enhanced Upcoming Event Card with image loading */
+const UpcomingEventCard = ({ event, index }) => {
+  const [image, setImage] = useState(getBestImage(event.images, 'thumb', 200));
+  const [loadingImage, setLoadingImage] = useState(false);
+
+  useEffect(() => {
+    const loadArtistImage = async () => {
+      if (!image && event.title && !loadingImage) {
+        setLoadingImage(true);
+        const artistName = event.title.split(/[@\-–]|at\s/i)[0].trim();
+        const artistImage = await fetchArtistImage(artistName);
+        if (artistImage) {
+          setImage(artistImage);
+        }
+        setLoadingImage(false);
+      }
+    };
+    loadArtistImage();
+  }, [event.title, image, loadingImage]);
+
+  return (
+    <div key={event.id || index} style={{ width: 300, flexShrink: 0 }} className="card">
+      <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+        <div style={{
+          width: 72, height: 72, borderRadius: 10, overflow: 'hidden',
+          flexShrink: 0, background: 'var(--bg-3)', position: 'relative'
+        }}>
+          {image ? (
+            <img src={image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-2)' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+            </div>
+          )}
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <h4 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.9rem', lineHeight: 1.3, marginBottom: '0.25rem' }}>{event.title}</h4>
+          <p style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.15rem' }}>{event.venue_name || 'TBA'}</p>
+          <span style={{ fontSize: '0.75rem', color: 'var(--emerald)', fontWeight: 600 }}>{formatDate(event.start_time)} {formatTime(event.start_time) && `\u00B7 ${formatTime(event.start_time)}`}</span>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -1054,32 +1099,9 @@ const Dashboard = () => {
             <h2 className="section-header-title">Coming up</h2>
           </div>
           <div className="scroll-row">
-            {upcoming.slice(0, 10).map((event, i) => {
-              const img = getBestImage(event.images, 'thumb', 200);
-              return (
-                <div key={event.id || i} style={{ width: 300, flexShrink: 0 }} className="card" >
-                  <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
-                    <div style={{
-                      width: 72, height: 72, borderRadius: 10, overflow: 'hidden',
-                      flexShrink: 0, background: 'var(--bg-3)'
-                    }}>
-                      {img ? (
-                        <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-2)' }}>
-                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <h4 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.9rem', lineHeight: 1.3, marginBottom: '0.25rem' }}>{event.title}</h4>
-                      <p style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.15rem' }}>{event.venue_name || 'TBA'}</p>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--emerald)', fontWeight: 600 }}>{formatDate(event.start_time)} {formatTime(event.start_time) && `\u00B7 ${formatTime(event.start_time)}`}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {upcoming.slice(0, 10).map((event, i) => (
+              <UpcomingEventCard key={event.id || i} event={event} index={i} />
+            ))}
           </div>
         </section>
       )}
@@ -1124,26 +1146,51 @@ const Dashboard = () => {
           <Link to="/djs" className="section-header-link">See all &rarr;</Link>
         </div>
         <div className="scroll-row">
-          {djs.slice(0, 10).map((dj) => (
-            <Link to="/djs" key={dj.dj_id} className="card-artist" style={{ width: 180, flexShrink: 0 }}>
-              <div className="card-artist-img-wrap">
-                <div style={{
-                  position: 'absolute', inset: 0,
-                  background: `linear-gradient(135deg, hsl(${(dj.dj_id * 67) % 360}, 40%, 18%), hsl(${(dj.dj_id * 31) % 360}, 25%, 12%))`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center'
-                }}>
-                  <span style={{ fontSize: '2rem', fontWeight: 800, color: 'rgba(255,255,255,0.15)' }}>
-                    {(dj.dj_name || '?')[0].toUpperCase()}
-                  </span>
-                </div>
-              </div>
-              <div className="card-artist-body">
-                <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.15rem' }}>{dj.dj_name}</h3>
-                <p className="line-clamp-1" style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{dj.genres || 'Various'}</p>
-                <span style={{ fontSize: '0.68rem', color: 'var(--emerald)' }}>{dj.city || 'Ireland'}</span>
-              </div>
-            </Link>
-          ))}
+          {djs.slice(0, 10).map((dj) => {
+            const DJCardWithImage = () => {
+              const [djImage, setDjImage] = useState(null);
+              const [loadingImage, setLoadingImage] = useState(false);
+
+              useEffect(() => {
+                const loadImage = async () => {
+                  if (!loadingImage && dj.dj_name) {
+                    setLoadingImage(true);
+                    const image = await fetchArtistImage(dj.dj_name);
+                    if (image) setDjImage(image);
+                    setLoadingImage(false);
+                  }
+                };
+                loadImage();
+              }, []);
+
+              return (
+                <Link to="/djs" key={dj.dj_id} className="card-artist" style={{ width: 180, flexShrink: 0 }}>
+                  <div className="card-artist-img-wrap">
+                    {djImage ? (
+                      <img src={djImage} alt={dj.dj_name} className="card-artist-img" loading="lazy" />
+                    ) : (
+                      <div style={{
+                        position: 'absolute', inset: 0,
+                        background: `linear-gradient(135deg, hsl(${(dj.dj_id * 67) % 360}, 40%, 18%), hsl(${(dj.dj_id * 31) % 360}, 25%, 12%))`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}>
+                        <span style={{ fontSize: '2rem', fontWeight: 800, color: 'rgba(255,255,255,0.15)' }}>
+                          {(dj.dj_name || '?')[0].toUpperCase()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="card-artist-body">
+                    <h3 className="line-clamp-1" style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.15rem' }}>{dj.dj_name}</h3>
+                    <p className="line-clamp-1" style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{dj.genres || 'Various'}</p>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--emerald)' }}>{dj.city || 'Ireland'}</span>
+                  </div>
+                </Link>
+              );
+            };
+
+            return <DJCardWithImage key={dj.dj_id} />;
+          })}
         </div>
       </section>
 
