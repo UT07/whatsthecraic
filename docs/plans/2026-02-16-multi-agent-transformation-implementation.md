@@ -16,7 +16,7 @@ Before starting, verify:
 - [ ] Current directory: `/Users/ut/whatsthecraic`
 - [ ] On master branch with clean working tree
 - [ ] Master prompt read: `CLAUDE_CODE_MASTER_PROMPT.md`
-- [ ] Design doc read: `docs/plans/2026-02-15-multi-agent-transformation-design.md`
+- [ ] Design doc read: `docs/plans/2<REDACTED_DB_PASSWORD>26-<REDACTED_DB_PASSWORD>2-15-multi-agent-transformation-design.md`
 - [ ] AWS credentials configured
 - [ ] kubectl configured for k8s cluster
 
@@ -187,7 +187,7 @@ PRIMARY OBJECTIVE: Verify backend infrastructure is healthy and ML service endpo
 
 TASKS:
 1. Verify TLS certificates on Traefik (check ACME status, fix if self-signed)
-   - SSH to EC2 i-077f139e329506bf5 via SSM
+   - SSH to EC2 i-<REDACTED_DB_PASSWORD>77f139e3295<REDACTED_DB_PASSWORD>6bf5 via SSM
    - Check traefik pod logs for ACME errors
    - Verify https://api.whatsthecraic.run.place uses Let's Encrypt cert (not self-signed)
 
@@ -199,8 +199,8 @@ TASKS:
    - GET /v1/experiments/:id/results → should return results
 
 3. Test backend API integration (aggregator proxies ML service correctly)
-   - Verify aggregator routes /v1/recommendations to ml-service:4004
-   - Verify aggregator routes /v1/feedback to ml-service:4004
+   - Verify aggregator routes /v1/recommendations to ml-service:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4
+   - Verify aggregator routes /v1/feedback to ml-service:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4
 
 4. Fix any backend bugs discovered during verification
 
@@ -489,7 +489,7 @@ DEPENDENCIES:
 
 TASKS:
 1. Fix React Error #31 in Dashboard.jsx:
-   - Line ~220-230: topGenres rendering issue
+   - Line ~22<REDACTED_DB_PASSWORD>-23<REDACTED_DB_PASSWORD>: topGenres rendering issue
    - Backend returns [{genre: "House", count: 5}, ...]
    - JSX renders {g} instead of {g.genre}
    - Fix: Normalize data or use g.genre/g in rendering
@@ -521,10 +521,10 @@ TASKS:
    - Artist spotlight: Featured artist with image, bio, upcoming events, Mixcloud embed (from Visual Agent)
    - Quick stats: Total events, match quality distribution, ML indicators
    - Use Framer Motion for animations (fade-in + slide-up)
-   - Tailwind CSS for styling (dark theme, emerald accent #00d67d)
+   - Tailwind CSS for styling (dark theme, emerald accent #<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>d67d)
 
 6. Mobile responsiveness:
-   - Test Dashboard on mobile viewport (375px, 768px, 1024px)
+   - Test Dashboard on mobile viewport (375px, 768px, 1<REDACTED_DB_PASSWORD>24px)
    - Ensure cards stack vertically on mobile
    - Ensure images scale properly
    - Ensure carousels scroll smoothly
@@ -670,13 +670,13 @@ TASKS:
    - Model Health Widget:
      - Call mlAPI.getModelInfo()
      - Display: version, last_trained, training_samples, validation_metrics, prediction_count, avg_latency
-     - Color-code latency: <100ms green, 100-200ms yellow, >200ms red
+     - Color-code latency: <1<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms green, 1<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>-2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms yellow, >2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms red
 
    - A/B Experiment Results Dashboard:
      - Call mlAPI.getExperiments()
      - For each experiment, call mlAPI.getExperimentResults(experimentId)
      - Display table: variant name, user count, conversion rate, statistical significance
-     - Color-code significance: p<0.05 green, else gray
+     - Color-code significance: p<<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>5 green, else gray
 
    - Manual Retrain Trigger:
      - Button: "Retrain Model Now"
@@ -691,7 +691,7 @@ TASKS:
 
 2. Update GitHub Actions:
    - .github/workflows/deploy.yml
-   - Update EC2_INSTANCE_ID secret to i-077f139e329506bf5
+   - Update EC2_INSTANCE_ID secret to i-<REDACTED_DB_PASSWORD>77f139e3295<REDACTED_DB_PASSWORD>6bf5
    - Ensure workflow uses correct instance
 
 3. Prepare deployment scripts:
@@ -710,8 +710,8 @@ TASKS:
 
 5. Set up ML model retraining cron job (prepare, don't deploy yet):
    - Create k8s CronJob manifest: k8s/ml-retrain-cronjob.yaml
-   - Schedule: 0 2 * * * (daily at 2 AM)
-   - Command: curl -X POST http://ml-service:4004/v1/model/retrain
+   - Schedule: <REDACTED_DB_PASSWORD> 2 * * * (daily at 2 AM)
+   - Command: curl -X POST http://ml-service:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/v1/model/retrain
    - DO NOT kubectl apply yet - that happens in Wave 3
 
 6. Commit all changes:
@@ -763,9 +763,9 @@ cat docs/agent-coordination.md
 **Check git logs in worktrees:**
 
 ```bash
-cd /tmp/wtc-worktrees/worktree-frontend-core && git log --oneline -10
-cd /tmp/wtc-worktrees/worktree-visual-media && git log --oneline -10
-cd /tmp/wtc-worktrees/worktree-admin-devops && git log --oneline -10
+cd /tmp/wtc-worktrees/worktree-frontend-core && git log --oneline -1<REDACTED_DB_PASSWORD>
+cd /tmp/wtc-worktrees/worktree-visual-media && git log --oneline -1<REDACTED_DB_PASSWORD>
+cd /tmp/wtc-worktrees/worktree-admin-devops && git log --oneline -1<REDACTED_DB_PASSWORD>
 ```
 
 **Expected:** Commits from all 3 agents
@@ -974,7 +974,7 @@ pytest tests/
 ```bash
 cd gigfinder-app
 REACT_APP_API_BASE=https://api.whatsthecraic.run.place \
-  NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=1024" \
+  NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=1<REDACTED_DB_PASSWORD>24" \
   npm run build --legacy-peer-deps
 ```
 
@@ -1054,7 +1054,7 @@ docker-compose up
 **Test flows:**
 
 1. **Unauthenticated User Flow:**
-   - [ ] Visit http://localhost:3000
+   - [ ] Visit http://localhost:3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>
    - [ ] Defaults to Search mode (not "For You")
    - [ ] Search "Dublin" → returns events
    - [ ] Event cards show images (Spotify, Ticketmaster, gradients)
@@ -1087,7 +1087,7 @@ docker-compose up
    - [ ] Mixcloud player embeds correctly
 
 6. **Admin Dashboard:**
-   - [ ] Navigate to http://localhost:3000/admin/ml
+   - [ ] Navigate to http://localhost:3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>/admin/ml
    - [ ] Model health widget shows metrics
    - [ ] A/B results display
    - [ ] Manual retrain button works
@@ -1109,28 +1109,28 @@ docker-compose up
 **Test ML prediction latency:**
 
 ```bash
-curl -X POST http://localhost:4004/v1/recommendations \
+curl -X POST http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/v1/recommendations \
   -H "Content-Type: application/json" \
-  -d '{"user_id": 1, "city": "Dublin", "limit": 20}' \
+  -d '{"user_id": 1, "city": "Dublin", "limit": 2<REDACTED_DB_PASSWORD>}' \
   -w "\nTime: %{time_total}s\n"
 ```
 
-**Expected:** <0.2s (200ms)
+**Expected:** <<REDACTED_DB_PASSWORD>.2s (2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms)
 
 **Test feed personalization latency:**
 
 ```bash
 TOKEN="<get-from-login>"
 curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:4000/v1/users/me/feed \
+  http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>/v1/users/me/feed \
   -w "\nTime: %{time_total}s\n"
 ```
 
-**Expected:** <0.3s (300ms)
+**Expected:** <<REDACTED_DB_PASSWORD>.3s (3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms)
 
 **Checklist:**
-- [ ] ML prediction latency <200ms
-- [ ] Feed latency <300ms
+- [ ] ML prediction latency <2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms
+- [ ] Feed latency <3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms
 
 ---
 
@@ -1139,7 +1139,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 **Check design consistency:**
 
 - [ ] Dashboard looks premium (hero, carousels, trending)
-- [ ] Color scheme consistent (emerald #00d67d)
+- [ ] Color scheme consistent (emerald #<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>d67d)
 - [ ] Typography clean (Inter font)
 - [ ] Border radius consistent (12-16px cards)
 - [ ] Animations smooth (Framer Motion)
@@ -1155,8 +1155,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 **Check for exposed secrets:**
 
 ```bash
-grep -r "REDACTED_DB_PASSWORD" gigfinder-app/
-grep -r "REDACTED_GITHUB_PAT" gigfinder-app/
+grep -r "wtcRds2<REDACTED_DB_PASSWORD>26secureP" gigfinder-app/
+grep -r "ghp_l2g<REDACTED_DB_PASSWORD>tBHTi73cbg1zwLlI2J3EamGoXs<REDACTED_DB_PASSWORD>GOO4o" gigfinder-app/
 ```
 
 **Expected:** No results (no exposed secrets)
@@ -1184,8 +1184,8 @@ mysql -h localhost -u REDACTED_DB_USER -p gigsdb -e "SELECT COUNT(*) FROM ml_fee
 2. Connect Spotify
 3. Save 3 House genre events
 4. Check ml_feedback table: `SELECT * FROM ml_feedback WHERE action='save';`
-5. Trigger retrain: `curl -X POST http://localhost:4004/v1/model/retrain`
-6. Get recommendations: `curl -X POST http://localhost:4004/v1/recommendations -d '{"user_id": <id>}'`
+5. Trigger retrain: `curl -X POST http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/v1/model/retrain`
+6. Get recommendations: `curl -X POST http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/v1/recommendations -d '{"user_id": <id>}'`
 7. Verify House genre events in recommendations
 
 **Checklist:**
@@ -1215,7 +1215,7 @@ cat >> docs/agent-coordination.md << 'EOF'
 
 - All automated tests passing
 - All manual smoke tests passing
-- Performance metrics acceptable (<200ms ML, <300ms feed)
+- Performance metrics acceptable (<2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms ML, <3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms feed)
 - Visual QA approved
 - Security checks passed
 - Integration tests passed
@@ -1245,21 +1245,21 @@ git push origin dev/phase-1-4-complete
 **Step 1: Create git tag**
 
 ```bash
-git tag -a v2.0.0-ml-transformation -m "Phase 1-4 complete: ML integration, visual polish, admin dashboard"
-git push origin v2.0.0-ml-transformation
+git tag -a v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-ml-transformation -m "Phase 1-4 complete: ML integration, visual polish, admin dashboard"
+git push origin v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-ml-transformation
 ```
 
 **Step 2: Backup production database**
 
 ```bash
 # SSH to database EC2 via SSM
-aws ssm start-session --target i-0b90dcecaeadf43a2
+aws ssm start-session --target i-<REDACTED_DB_PASSWORD>b9<REDACTED_DB_PASSWORD>dcecaeadf43a2
 
 # In SSM session
-mysqldump -u REDACTED_DB_USER -p gigsdb > backup-pre-v2.0.0-$(date +%Y%m%d).sql
+mysqldump -u REDACTED_DB_USER -p gigsdb > backup-pre-v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-$(date +%Y%m%d).sql
 
 # Upload to S3 (create bucket if needed)
-aws s3 cp backup-pre-v2.0.0-*.sql s3://wtc-backups/
+aws s3 cp backup-pre-v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-*.sql s3://wtc-backups/
 exit
 ```
 
@@ -1276,15 +1276,15 @@ cd gigfinder-app
 
 # Build
 REACT_APP_API_BASE=https://api.whatsthecraic.run.place \
-  NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=1024" \
+  NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=1<REDACTED_DB_PASSWORD>24" \
   npm run build --legacy-peer-deps
 
 # Deploy to S3
-aws s3 sync build/ s3://wtc-ui-385017713886-eu-west-1/ --delete
+aws s3 sync build/ s3://wtc-ui-385<REDACTED_DB_PASSWORD>17713886-eu-west-1/ --delete
 
 # Invalidate CloudFront cache
 aws cloudfront create-invalidation \
-  --distribution-id E2HRBT0I8G9WPY \
+  --distribution-id E2HRBT<REDACTED_DB_PASSWORD>I8G9WPY \
   --paths "/*"
 ```
 
@@ -1296,7 +1296,7 @@ aws cloudfront create-invalidation \
 curl -I https://whatsthecraic.run.place
 ```
 
-**Expected:** Status 200, site loads
+**Expected:** Status 2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>, site loads
 
 **Test:**
 - [ ] Visit https://whatsthecraic.run.place
@@ -1320,18 +1320,18 @@ docker build -t whatsthecraic/ml-service .
 
 # Tag
 docker tag whatsthecraic/ml-service \
-  385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.0.0
+  385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>
 
 # Push to ECR
 aws ecr get-login-password --region eu-west-1 | \
   docker login --username AWS --password-stdin \
-  385017713886.dkr.ecr.eu-west-1.amazonaws.com
+  385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com
 
-docker push 385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.0.0
+docker push 385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>
 
 # Deploy to k8s
 kubectl set image deployment/ml-service \
-  ml-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.0.0 \
+  ml-service=385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD> \
   -n whatsthecraic
 
 kubectl rollout status deployment/ml-service -n whatsthecraic
@@ -1360,7 +1360,7 @@ curl https://api.whatsthecraic.run.place/v1/model/info
 
 Via GitHub UI:
 - Settings → Secrets and variables → Actions
-- Update `EC2_INSTANCE_ID` to `i-077f139e329506bf5`
+- Update `EC2_INSTANCE_ID` to `i-<REDACTED_DB_PASSWORD>77f139e3295<REDACTED_DB_PASSWORD>6bf5`
 
 **Deploy ML retraining cron:**
 
@@ -1403,7 +1403,7 @@ curl https://api.whatsthecraic.run.place/metrics | grep ml_
 
 **Set up CloudWatch alarms:**
 
-- ML prediction latency >500ms
+- ML prediction latency >5<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms
 - Error rate >1%
 - Model training failures
 
@@ -1461,7 +1461,7 @@ git push origin --delete dev/phase-1-4-complete
 ## Success Criteria
 
 **Technical:**
-- ✅ All 4 phases complete (~20 tasks)
+- ✅ All 4 phases complete (~2<REDACTED_DB_PASSWORD> tasks)
 - ✅ React Error #31 fixed
 - ✅ ML service integrated with frontend
 - ✅ Rich images everywhere
@@ -1469,7 +1469,7 @@ git push origin --delete dev/phase-1-4-complete
 - ✅ Admin ML dashboard built
 - ✅ TLS certificates valid
 - ✅ All tests passing
-- ✅ ML prediction latency <200ms p95
+- ✅ ML prediction latency <2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms p95
 - ✅ Frontend deployed to CloudFront
 - ✅ Backend services deployed to k8s
 
@@ -1497,9 +1497,9 @@ If critical issues discovered in production:
 **Frontend rollback:**
 ```bash
 # Redeploy previous S3 version
-aws s3 sync s3://wtc-ui-385017713886-eu-west-1-backup/ \
-  s3://wtc-ui-385017713886-eu-west-1/ --delete
-aws cloudfront create-invalidation --distribution-id E2HRBT0I8G9WPY --paths "/*"
+aws s3 sync s3://wtc-ui-385<REDACTED_DB_PASSWORD>17713886-eu-west-1-backup/ \
+  s3://wtc-ui-385<REDACTED_DB_PASSWORD>17713886-eu-west-1/ --delete
+aws cloudfront create-invalidation --distribution-id E2HRBT<REDACTED_DB_PASSWORD>I8G9WPY --paths "/*"
 ```
 
 **Backend rollback:**
@@ -1511,8 +1511,8 @@ kubectl rollout undo deployment/events-service -n whatsthecraic
 **Database rollback:**
 ```bash
 # Restore from backup
-aws s3 cp s3://wtc-backups/backup-pre-v2.0.0-*.sql .
-mysql -h REDACTED_DB_HOST -u REDACTED_DB_USER -p gigsdb < backup-pre-v2.0.0-*.sql
+aws s3 cp s3://wtc-backups/backup-pre-v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-*.sql .
+mysql -h 172.31.3<REDACTED_DB_PASSWORD>.66 -u REDACTED_DB_USER -p gigsdb < backup-pre-v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-*.sql
 ```
 
 ---

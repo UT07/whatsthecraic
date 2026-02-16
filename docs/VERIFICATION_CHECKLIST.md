@@ -1,7 +1,7 @@
 # Wave 3: Comprehensive Verification Checklist
 
 **Branch:** `dev/phase-1-4-complete`
-**Date:** 2026-02-16
+**Date:** 2<REDACTED_DB_PASSWORD>26-<REDACTED_DB_PASSWORD>2-16
 **Status:** Ready for Manual Verification
 
 ---
@@ -31,7 +31,7 @@ npm start
 ```
 
 #### Test 1: Unauthenticated User Flow
-- [ ] Visit http://localhost:3000
+- [ ] Visit http://localhost:3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>
 - [ ] Verify: Dashboard defaults to "Search" mode (not "For You")
 - [ ] Search for "Dublin" → returns events
 - [ ] Event cards show images (Spotify, Ticketmaster, or gradient placeholders)
@@ -73,7 +73,7 @@ npm start
 - [ ] Images load quickly (check sessionStorage cache in DevTools)
 
 #### Test 6: Admin Dashboard
-- [ ] Navigate to http://localhost:3000/admin/ml
+- [ ] Navigate to http://localhost:3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>/admin/ml
 - [ ] Requires admin role (redirect if not admin)
 - [ ] Model health widget shows version, metrics, latency
 - [ ] A/B experiment results display (if available)
@@ -85,7 +85,7 @@ npm start
 - [ ] Open DevTools → Toggle device toolbar (Cmd+Shift+M)
 - [ ] Test iPhone SE (375px): Cards stack vertically, images scale
 - [ ] Test iPad (768px): 2-column grid works, carousels scroll
-- [ ] Test Desktop (1024px+): Full 3-4 column layout
+- [ ] Test Desktop (1<REDACTED_DB_PASSWORD>24px+): Full 3-4 column layout
 - [ ] Hero section responsive on all sizes
 - [ ] No horizontal overflow or broken layouts
 
@@ -96,28 +96,28 @@ npm start
 **ML Prediction Latency:**
 ```bash
 # Test ML recommendations endpoint
-curl -X POST http://localhost:4004/v1/recommendations \
+curl -X POST http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/v1/recommendations \
   -H "Content-Type: application/json" \
-  -d '{"user_id": 1, "city": "Dublin", "limit": 20}' \
+  -d '{"user_id": 1, "city": "Dublin", "limit": 2<REDACTED_DB_PASSWORD>}' \
   -w "\nTime: %{time_total}s\n"
 ```
 
-**Expected:** < 0.2s (200ms)
+**Expected:** < <REDACTED_DB_PASSWORD>.2s (2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms)
 
-- [ ] ML prediction latency < 200ms
+- [ ] ML prediction latency < 2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms
 
 **Feed Personalization Latency:**
 ```bash
 # Get auth token from browser (DevTools → Application → localStorage → token)
 TOKEN="<your-token-here>"
 curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:4000/v1/users/me/feed \
+  http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>/v1/users/me/feed \
   -w "\nTime: %{time_total}s\n"
 ```
 
-**Expected:** < 0.3s (300ms)
+**Expected:** < <REDACTED_DB_PASSWORD>.3s (3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms)
 
-- [ ] Feed latency < 300ms
+- [ ] Feed latency < 3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms
 
 ---
 
@@ -125,7 +125,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 **Design Consistency:**
 - [ ] Dashboard looks premium (hero section, carousels, trending sections)
-- [ ] Color scheme consistent (emerald #00d67d accent)
+- [ ] Color scheme consistent (emerald #<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>d67d accent)
 - [ ] Typography clean (Inter font family)
 - [ ] Border radius consistent (12-16px on cards)
 - [ ] Animations smooth (Framer Motion transitions)
@@ -162,16 +162,16 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 4. **Trigger Model Retrain:**
    ```bash
-   curl -X POST http://localhost:4004/v1/model/retrain
+   curl -X POST http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/v1/model/retrain
    ```
    - [ ] Retrain completes successfully
    - [ ] Returns new metrics
 
 5. **Get Personalized Recommendations:**
    ```bash
-   curl -X POST http://localhost:4004/v1/recommendations \
+   curl -X POST http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/v1/recommendations \
      -H "Content-Type: application/json" \
-     -d '{"user_id": <your-user-id>, "city": "Dublin", "limit": 20}'
+     -d '{"user_id": <your-user-id>, "city": "Dublin", "limit": 2<REDACTED_DB_PASSWORD>}'
    ```
    - [ ] Recommendations returned
    - [ ] House/Techno events rank higher than Pop
@@ -231,8 +231,8 @@ Once all checklist items are ✅:
 
 2. **Create git tag:**
    ```bash
-   git tag -a v2.0.0-ml-transformation -m "Phase 1-4 complete"
-   git push origin v2.0.0-ml-transformation
+   git tag -a v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-ml-transformation -m "Phase 1-4 complete"
+   git push origin v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-ml-transformation
    ```
 
 3. **Backup production database:**
@@ -267,9 +267,9 @@ If issues found in production:
 **Frontend Rollback:**
 ```bash
 # Redeploy previous S3 version
-aws s3 sync s3://wtc-ui-385017713886-eu-west-1-backup/ \
-  s3://wtc-ui-385017713886-eu-west-1/ --delete
-aws cloudfront create-invalidation --distribution-id E2HRBT0I8G9WPY --paths "/*"
+aws s3 sync s3://wtc-ui-385<REDACTED_DB_PASSWORD>17713886-eu-west-1-backup/ \
+  s3://wtc-ui-385<REDACTED_DB_PASSWORD>17713886-eu-west-1/ --delete
+aws cloudfront create-invalidation --distribution-id E2HRBT<REDACTED_DB_PASSWORD>I8G9WPY --paths "/*"
 ```
 
 **Backend Rollback:**
@@ -282,7 +282,7 @@ kubectl rollout status deployment/ml-service -n whatsthecraic
 **Database Rollback:**
 ```bash
 # Restore from backup
-mysql -u REDACTED_DB_USER -p gigsdb < backup-pre-v2.0.0-20260216.sql
+mysql -u REDACTED_DB_USER -p gigsdb < backup-pre-v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-2<REDACTED_DB_PASSWORD>26<REDACTED_DB_PASSWORD>216.sql
 ```
 
 ---

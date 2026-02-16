@@ -1,6 +1,6 @@
 # WhatsTheCraic: Multi-Agent Transformation Design
 
-**Date:** 2026-02-15
+**Date:** 2<REDACTED_DB_PASSWORD>26-<REDACTED_DB_PASSWORD>2-15
 **Status:** Approved
 **Approach:** Domain-Based Parallelization with Progressive Waves
 **Scope:** All 4 Phases (Fix & Stabilize, ML Integration, Visual Polish, Deploy & Maintain)
@@ -251,7 +251,7 @@ Admin & DevOps:     Admin pages, GitHub Actions, k8s configs, deployment scripts
    - Manual retrain trigger button
    - CloudWatch/Prometheus metrics visualization
 
-2. Update GitHub Actions secret `EC2_INSTANCE_ID` to `i-077f139e329506bf5`
+2. Update GitHub Actions secret `EC2_INSTANCE_ID` to `i-<REDACTED_DB_PASSWORD>77f139e3295<REDACTED_DB_PASSWORD>6bf5`
 3. Commit all changes to GitHub
 4. Set up ML model retraining cron job (daily or weekly)
 5. Prepare deployment scripts for rebuilding backend services to ECR + k8s
@@ -359,8 +359,8 @@ After all agents complete their work and merge to `dev/phase-1-4-complete`, run 
 ```bash
 npm run test:unit
 npm run test:integration
-curl -fsS http://localhost:4000/health
-curl -fsS http://localhost:4004/health  # ML service
+curl -fsS http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>/health
+curl -fsS http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/health  # ML service
 ```
 
 **Frontend Tests:**
@@ -429,25 +429,25 @@ pytest tests/
 
 ```bash
 # ML prediction latency
-curl -X POST http://localhost:4004/v1/recommendations
-# Should respond <200ms
+curl -X POST http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/v1/recommendations
+# Should respond <2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms
 
 # Feed personalization latency
-curl -H "Authorization: Bearer <token>" http://localhost:4000/v1/users/me/feed
-# Should respond <300ms
+curl -H "Authorization: Bearer <token>" http://localhost:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>/v1/users/me/feed
+# Should respond <3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms
 ```
 
 **Check Metrics:**
-- `ml_prediction_latency_ms` p95 <200ms
+- `ml_prediction_latency_ms` p95 <2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms
 - `ml_requests_total` incrementing
-- `ml_errors_total` = 0 or very low
+- `ml_errors_total` = <REDACTED_DB_PASSWORD> or very low
 
 ---
 
 ### Phase 4: Visual QA
 
 - Dashboard looks premium
-- Color scheme consistent (emerald `#00d67d`)
+- Color scheme consistent (emerald `#<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>d67d`)
 - Typography clean (Inter)
 - Border radius consistent (12-16px)
 - Animations smooth (Framer Motion)
@@ -462,7 +462,7 @@ curl -H "Authorization: Bearer <token>" http://localhost:4000/v1/users/me/feed
 curl -v https://api.whatsthecraic.run.place/health 2>&1 | grep "issuer"
 
 # No exposed secrets
-grep -r "REDACTED_DB_PASSWORD" gigfinder-app/
+grep -r "wtcRds2<REDACTED_DB_PASSWORD>26secureP" gigfinder-app/
 ```
 
 **Data Validation:**
@@ -502,14 +502,14 @@ grep -r "REDACTED_DB_PASSWORD" gigfinder-app/
 
 1. **Create Git Tag:**
    ```bash
-   git tag -a v2.0.0-ml-transformation -m "Phase 1-4 complete"
-   git push origin v2.0.0-ml-transformation
+   git tag -a v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-ml-transformation -m "Phase 1-4 complete"
+   git push origin v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-ml-transformation
    ```
 
 2. **Backup Database:**
    ```bash
-   mysqldump -u REDACTED_DB_USER -p gigsdb > backup-pre-v2.0.0-$(date +%Y%m%d).sql
-   aws s3 cp backup-pre-v2.0.0-*.sql s3://wtc-backups/
+   mysqldump -u REDACTED_DB_USER -p gigsdb > backup-pre-v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-$(date +%Y%m%d).sql
+   aws s3 cp backup-pre-v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>-*.sql s3://wtc-backups/
    ```
 
 ---
@@ -519,11 +519,11 @@ grep -r "REDACTED_DB_PASSWORD" gigfinder-app/
 ```bash
 cd gigfinder-app
 REACT_APP_API_BASE=https://api.whatsthecraic.run.place \
-  NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=1024" \
+  NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=1<REDACTED_DB_PASSWORD>24" \
   npm run build --legacy-peer-deps
 
-aws s3 sync build/ s3://wtc-ui-385017713886-eu-west-1/ --delete
-aws cloudfront create-invalidation --distribution-id E2HRBT0I8G9WPY --paths "/*"
+aws s3 sync build/ s3://wtc-ui-385<REDACTED_DB_PASSWORD>17713886-eu-west-1/ --delete
+aws cloudfront create-invalidation --distribution-id E2HRBT<REDACTED_DB_PASSWORD>I8G9WPY --paths "/*"
 ```
 
 **Verify:** Visit https://whatsthecraic.run.place, check Dashboard, no console errors
@@ -538,10 +538,10 @@ aws cloudfront create-invalidation --distribution-id E2HRBT0I8G9WPY --paths "/*"
 ```bash
 cd ml-service
 docker build -t whatsthecraic/ml-service .
-docker tag whatsthecraic/ml-service 385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.0.0
-docker push 385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.0.0
+docker tag whatsthecraic/ml-service 385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>
+docker push 385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD>
 
-kubectl set image deployment/ml-service ml-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.0.0 -n whatsthecraic
+kubectl set image deployment/ml-service ml-service=385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:v2.<REDACTED_DB_PASSWORD>.<REDACTED_DB_PASSWORD> -n whatsthecraic
 kubectl rollout status deployment/ml-service -n whatsthecraic
 ```
 
@@ -560,15 +560,15 @@ curl https://api.whatsthecraic.run.place/v1/model/info
 
 ```bash
 # If new tables/columns added
-mysql -h REDACTED_DB_HOST -u REDACTED_DB_USER -p gigsdb < migrations/add-ml-feedback-table.sql
+mysql -h 172.31.3<REDACTED_DB_PASSWORD>.66 -u REDACTED_DB_USER -p gigsdb < migrations/add-ml-feedback-table.sql
 ```
 
 ---
 
 ### Stage 4: Configuration Updates
 
-- Update GitHub Actions secret `EC2_INSTANCE_ID` to `i-077f139e329506bf5`
-- Set up ML retraining cron: `0 2 * * * curl -X POST http://ml-service:4004/v1/model/retrain`
+- Update GitHub Actions secret `EC2_INSTANCE_ID` to `i-<REDACTED_DB_PASSWORD>77f139e3295<REDACTED_DB_PASSWORD>6bf5`
+- Set up ML retraining cron: `<REDACTED_DB_PASSWORD> 2 * * * curl -X POST http://ml-service:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4/v1/model/retrain`
 
 ---
 
@@ -585,7 +585,7 @@ mysql -h REDACTED_DB_HOST -u REDACTED_DB_USER -p gigsdb < migrations/add-ml-feed
 ### Stage 6: Monitoring & Cleanup
 
 **Alerts:**
-- ML prediction latency >500ms
+- ML prediction latency >5<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms
 - Error rate >1%
 - Model training failures
 
@@ -624,7 +624,7 @@ git push origin --delete dev/phase-1-4-complete
 ## 6. Success Criteria
 
 **Technical:**
-- ✅ All 4 phases complete (~20 tasks)
+- ✅ All 4 phases complete (~2<REDACTED_DB_PASSWORD> tasks)
 - ✅ React Error #31 fixed
 - ✅ ML service integrated with frontend
 - ✅ Rich images everywhere (Spotify, Mixcloud, Ticketmaster)
@@ -632,7 +632,7 @@ git push origin --delete dev/phase-1-4-complete
 - ✅ Admin ML dashboard built
 - ✅ TLS certificates valid
 - ✅ All tests passing
-- ✅ ML prediction latency <200ms p95
+- ✅ ML prediction latency <2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>ms p95
 - ✅ Frontend deployed to CloudFront
 - ✅ Backend services deployed to k8s
 
@@ -671,9 +671,9 @@ git push origin --delete dev/phase-1-4-complete
 - Wave 1 (2 agents): 1.5 hours
 - Wave 2 (3 agents): 2.5 hours
 - Wave 3 (polish/deploy): 1.5 hours
-- Integration & merge: 0.5 hours
+- Integration & merge: <REDACTED_DB_PASSWORD>.5 hours
 - Comprehensive verification: 1.5 hours
-- Deployment: 0.5 hours
+- Deployment: <REDACTED_DB_PASSWORD>.5 hours
 
 **Total: ~6-7 hours**
 

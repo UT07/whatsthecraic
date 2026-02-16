@@ -11,30 +11,30 @@ The goal is to make this a **world-class, professional event management website*
 ## ARCHITECTURE
 
 ### Infrastructure (LIVE on AWS — DO NOT break existing deployments)
-- **k3s Kubernetes** on EC2 `i-077f139e329506bf5` (t4g.small, EIP `18.200.151.2`)
-- **MariaDB 10.5** on EC2 `i-0b90dcecaeadf43a2` (t4g.micro, private IP `REDACTED_DB_HOST`)
-- **ECR**: `385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/*`
-- **S3 Frontend**: `wtc-ui-385017713886-eu-west-1`
-- **CloudFront**: `E2HRBT0I8G9WPY` → `whatsthecraic.run.place` + `www.whatsthecraic.run.place`
-- **Route53 Zone**: `Z04190482472E3WUYYQ62`
+- **k3s Kubernetes** on EC2 `i-<REDACTED_DB_PASSWORD>77f139e3295<REDACTED_DB_PASSWORD>6bf5` (t4g.small, EIP `18.2<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>.151.2`)
+- **MariaDB 1<REDACTED_DB_PASSWORD>.5** on EC2 `i-<REDACTED_DB_PASSWORD>b9<REDACTED_DB_PASSWORD>dcecaeadf43a2` (t4g.micro, private IP `172.31.3<REDACTED_DB_PASSWORD>.66`)
+- **ECR**: `385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/*`
+- **S3 Frontend**: `wtc-ui-385<REDACTED_DB_PASSWORD>17713886-eu-west-1`
+- **CloudFront**: `E2HRBT<REDACTED_DB_PASSWORD>I8G9WPY` → `whatsthecraic.run.place` + `www.whatsthecraic.run.place`
+- **Route53 Zone**: `Z<REDACTED_DB_PASSWORD>419<REDACTED_DB_PASSWORD>482472E3WUYYQ62`
 - **API**: `api.whatsthecraic.run.place` → Traefik Ingress on k3s (Let's Encrypt TLS)
 - **Auth**: `auth.whatsthecraic.run.place` → Traefik Ingress on k3s
 
 ### Microservices (all in k8s namespace `whatsthecraic`)
 | Service | Port | Language | Purpose |
 |---|---|---|---|
-| aggregator | 4000 | Node.js/Express | Edge API gateway, proxies to all services |
-| auth-service | 3001 | Node.js/Express | JWT auth, Spotify OAuth, user preferences |
-| events-service | 4003 | Node.js/Express | Events CRUD, ingestion from external APIs, search, personalized feed, performers |
-| dj-service | 4002 | Node.js/Express | DJ directory CRUD + CSV/XLSX import |
-| venue-service | 4001 | Node.js/Express | Venue directory + availability slots |
-| ml-service | 4004 | Python/FastAPI | Collaborative filtering, A/B testing, monitoring, recommendations |
+| aggregator | 4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD> | Node.js/Express | Edge API gateway, proxies to all services |
+| auth-service | 3<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>1 | Node.js/Express | JWT auth, Spotify OAuth, user preferences |
+| events-service | 4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>3 | Node.js/Express | Events CRUD, ingestion from external APIs, search, personalized feed, performers |
+| dj-service | 4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>2 | Node.js/Express | DJ directory CRUD + CSV/XLSX import |
+| venue-service | 4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>1 | Node.js/Express | Venue directory + availability slots |
+| ml-service | 4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4 | Python/FastAPI | Collaborative filtering, A/B testing, monitoring, recommendations |
 
 ### Frontend
 - **React 19** + React Router 7 + Tailwind CSS 2.2 + Framer Motion
 - **Chart.js** for analytics
 - **Axios** for API calls
-- Dark theme with Irish emerald accent (`--emerald: #00d67d`)
+- Dark theme with Irish emerald accent (`--emerald: #<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>d67d`)
 
 ### Database: MySQL/MariaDB (`gigsdb`)
 - Tables: users, events, event_sources, ingest_state, djs, venues, availability_slots, user_preferences, user_saved_events, user_hidden_events, alerts, organizer_plans, organizer_shortlist, contact_templates, contact_requests, ml_interactions, ab_assignments
@@ -48,17 +48,17 @@ The goal is to make this a **world-class, professional event management website*
 - **Dice.fm via Apify** — disabled currently
 
 ### GitHub
-- Repo: `UT07/whatsthecraic`
+- Repo: `UT<REDACTED_DB_PASSWORD>7/whatsthecraic`
 - PAT: `<redacted>` (stored in GitHub secrets)
 - CI/CD: `.github/workflows/deploy.yml` uses SSM RunShellScript
 
 ### Credentials (in k8s secrets)
-- DB: `REDACTED_DB_USER` / `REDACTED_DB_PASSWORD` @ `REDACTED_DB_HOST:3306/gigsdb`
-- JWT_SECRET: `REDACTED_JWT_SECRET`
+- DB: `REDACTED_DB_USER` / `wtcRds2<REDACTED_DB_PASSWORD>26secureP` @ `172.31.3<REDACTED_DB_PASSWORD>.66:33<REDACTED_DB_PASSWORD>6/gigsdb`
+- JWT_SECRET: `wtc-prod-secret-2<REDACTED_DB_PASSWORD>26`
 - TICKETMASTER_API_KEY: `OvTzrsAoD4gpLHZjvEON2Fsgnv3FhWGG`
-- BANDSINTOWN_APP_ID: `5a5456e9c02c389fc71856e8f4843467`
-- SPOTIFY_CLIENT_ID: `2251c81c607e4ebaa993a4e01a1a6a0b`
-- SPOTIFY_CLIENT_SECRET: `4a129ffc60ba4525a059ba56f2058b99`
+- BANDSINTOWN_APP_ID: `5a5456e9c<REDACTED_DB_PASSWORD>2c389fc71856e8f4843467`
+- SPOTIFY_CLIENT_ID: `2251c81c6<REDACTED_DB_PASSWORD>7e4ebaa993a4e<REDACTED_DB_PASSWORD>1a1a6a<REDACTED_DB_PASSWORD>b`
+- SPOTIFY_CLIENT_SECRET: `4a129ffc6<REDACTED_DB_PASSWORD>ba4525a<REDACTED_DB_PASSWORD>59ba56f2<REDACTED_DB_PASSWORD>58b99`
 
 ---
 
@@ -68,21 +68,21 @@ The goal is to make this a **world-class, professional event management website*
 There are TWO recommendation systems — one is active, one is built but **not yet wired to the frontend**:
 
 1. **On-device scoring** (ACTIVE) — runs inside `events-service/index.js`
-   - `scoreEventRow(event, userSignals)` computes a 0-1 score per event
+   - `scoreEventRow(event, userSignals)` computes a <REDACTED_DB_PASSWORD>-1 score per event
    - Signals: user preferences, Spotify top artists/genres, saved event history, hidden events
-   - Scoring weights: artist match (+5), venue match (+4), Spotify artist (+4), genre (+3), Spotify genre (+2), city (+2), budget (+1/-2), recency (+0-1), day-of-week (+1)
+   - Scoring weights: artist match (+5), venue match (+4), Spotify artist (+4), genre (+3), Spotify genre (+2), city (+2), budget (+1/-2), recency (+<REDACTED_DB_PASSWORD>-1), day-of-week (+1)
    - Returns `rank_score` and `rank_reasons` array per event
    - Used by `GET /v1/users/me/feed`
 
 2. **ML Service** (BUILT but NOT called from frontend) — `ml-service/` Python/FastAPI
    - **Collaborative filtering** via scikit-learn with user-item cosine similarity
    - **Content-based filtering** via genre/artist matching
-   - **Hybrid approach** — 60% collaborative + 40% content-based, with popularity fallback for cold starts
+   - **Hybrid approach** — 6<REDACTED_DB_PASSWORD>% collaborative + 4<REDACTED_DB_PASSWORD>% content-based, with popularity fallback for cold starts
    - **A/B testing framework** — 4 variants (control/popularity, collaborative, content-based, hybrid) with consistent user hashing via DynamoDB
    - **CloudWatch monitoring** — request counts, prediction latency, feedback tracking, model metrics
    - **Prometheus `/metrics` endpoint** — ml_requests_total, ml_predictions_total, ml_errors_total, ml_prediction_latency_ms
 
-### ML Service API Endpoints (at ml-service:4004, proxied through aggregator)
+### ML Service API Endpoints (at ml-service:4<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>4, proxied through aggregator)
 - `POST /v1/recommendations` — Get personalized recommendations (user_id, city, limit, context) → returns recommendations + model_version + ab_experiment
 - `POST /v1/feedback` — Record user action (user_id, event_id, action: save/hide/click/skip, context)
 - `GET /v1/model/info` — Model version, last_trained, training_samples, validation_metrics, prediction_count, avg_latency
@@ -91,8 +91,8 @@ There are TWO recommendation systems — one is active, one is built but **not y
 - `GET /v1/experiments/{experiment_id}/results` — Per-variant conversion rates
 
 ### Training Data Sources
-- `user_saved_events` (weight: +1.0) — positive signal
-- `user_hidden_events` (weight: -0.5) — negative signal
+- `user_saved_events` (weight: +1.<REDACTED_DB_PASSWORD>) — positive signal
+- `user_hidden_events` (weight: -<REDACTED_DB_PASSWORD>.5) — negative signal
 - `user_preferences` (genres, artists, cities, budget)
 - `user_spotify` (top_artists, top_genres from Spotify OAuth sync)
 - Event features (title, city, price, genres, venue, artist)
@@ -100,12 +100,12 @@ There are TWO recommendation systems — one is active, one is built but **not y
 
 ### Spotify Integration (feeds ML)
 - OAuth flow: `GET /auth/spotify/login` → Spotify → callback → store tokens
-- Syncs: top 50 artists (short/medium/long term), followed artists, saved track artists, genre aggregation
+- Syncs: top 5<REDACTED_DB_PASSWORD> artists (short/medium/long term), followed artists, saved track artists, genre aggregation
 - Stored in `user_spotify` table: spotify_user_id, top_artists (JSON), top_genres (JSON), last_synced_at
 - Auto-refreshes expired tokens
 
 ### What IS Shown in Dashboard Currently
-- Match percentage badge (e.g., "85% match") with color coding (emerald >70%, gold 40-70%, muted <40%)
+- Match percentage badge (e.g., "85% match") with color coding (emerald >7<REDACTED_DB_PASSWORD>%, gold 4<REDACTED_DB_PASSWORD>-7<REDACTED_DB_PASSWORD>%, muted <4<REDACTED_DB_PASSWORD>%)
 - Match reason badges: "Genre match", "Artist you follow", "Favourite venue", "Your city"
 - Spotify profile widget: connected status, top 5 genres, top 4 artists, sync button
 - Quick stats pills: total events, artists, venues
@@ -134,7 +134,7 @@ There are TWO recommendation systems — one is active, one is built but **not y
 7. **Taste Evolution** — "Your taste is evolving toward [genre]" based on recent saves vs historical
 8. **Smart Notifications** — "Events matching your taste just announced" using alerts + ML scoring
 9. **Click Tracking** — instrument event card clicks to feed `POST /v1/feedback` with action='click'
-10. **Collaborative "Fans like you"** — actually call `POST /v1/recommendations` from the frontend and show a "Fans like you also saved" section
+1<REDACTED_DB_PASSWORD>. **Collaborative "Fans like you"** — actually call `POST /v1/recommendations` from the frontend and show a "Fans like you also saved" section
 
 ### ML Integration Steps
 To activate the full ML pipeline in the frontend:
@@ -149,12 +149,12 @@ To activate the full ML pipeline in the frontend:
 ## KNOWN BUGS TO FIX
 
 ### 1. React Error #31 in Dashboard.jsx (CRITICAL)
-**File:** `gigfinder-app/src/pages/Dashboard.jsx` around lines 220-230
+**File:** `gigfinder-app/src/pages/Dashboard.jsx` around lines 22<REDACTED_DB_PASSWORD>-23<REDACTED_DB_PASSWORD>
 **Problem:** `topGenres` from the backend returns `[{genre: "House", count: 5}, ...]` (objects), but the JSX renders `{g}` directly instead of `{g.genre}`.
 **Fix:** Change `key={g}` → `key={typeof g === 'object' ? g.genre : g}` and `{g}` → `{typeof g === 'object' ? g.genre : g}` (or better yet, normalize the data once on receipt).
 
 ### 2. TLS Certificates — API endpoints may still use self-signed certs
-**Problem:** Traefik ACME TLS-ALPN-01 was rate-limited by Let's Encrypt after multiple failures. The certs may have since been issued, or may still be self-signed.
+**Problem:** Traefik ACME TLS-ALPN-<REDACTED_DB_PASSWORD>1 was rate-limited by Let's Encrypt after multiple failures. The certs may have since been issued, or may still be self-signed.
 **Check:** `curl -v https://api.whatsthecraic.run.place/health 2>&1 | grep "issuer"` on EC2 via SSM.
 **Fix if needed:** Clear `/data/acme.json` on the Traefik pod and restart it. Ensure Ingress only has `api.` and `auth.` hosts (not root domain — that's on CloudFront).
 
@@ -164,15 +164,15 @@ The frontend needs to be rebuilt with fixes and deployed to S3. The build comman
 cd /tmp/whatsthecraic/gigfinder-app
 npm install --legacy-peer-deps
 export PATH="$PWD/node_modules/.bin:$PATH"
-export NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=1024"
+export NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=1<REDACTED_DB_PASSWORD>24"
 REACT_APP_API_BASE=https://api.whatsthecraic.run.place react-scripts build
-aws s3 sync build/ s3://wtc-ui-385017713886-eu-west-1/ --delete
-aws cloudfront create-invalidation --distribution-id E2HRBT0I8G9WPY --paths "/*"
+aws s3 sync build/ s3://wtc-ui-385<REDACTED_DB_PASSWORD>17713886-eu-west-1/ --delete
+aws cloudfront create-invalidation --distribution-id E2HRBT<REDACTED_DB_PASSWORD>I8G9WPY --paths "/*"
 ```
 NOTE: Use `--legacy-peer-deps` because of react-vis dependency conflict. Use `--openssl-legacy-provider` for Node 18+ compatibility.
 
 ### 4. GitHub Actions Secret
-`EC2_INSTANCE_ID` needs updating to `i-077f139e329506bf5` (old instance was terminated).
+`EC2_INSTANCE_ID` needs updating to `i-<REDACTED_DB_PASSWORD>77f139e3295<REDACTED_DB_PASSWORD>6bf5` (old instance was terminated).
 
 ### 5. Code Not Committed
 Changes from prior sessions (collation fix, Dashboard.jsx fix, deploy.yml health checks) haven't been pushed to GitHub. There was a `.git/index.lock` permission issue in the mounted workspace. Fix by cloning fresh on EC2 or the local dev machine.
@@ -208,7 +208,7 @@ Mixcloud integration already exists in the backend (`events-service/mixcloud-cli
 4. **Genre discovery** — use Mixcloud genre search to suggest DJs for specific genres the user likes
 
 ### PRIORITY 4: Professional Dashboard Redesign with ML Intelligence
-The Dashboard (640 lines) needs to feel like a premium, ML-powered app homepage:
+The Dashboard (64<REDACTED_DB_PASSWORD> lines) needs to feel like a premium, ML-powered app homepage:
 
 1. **Hero section** — large featured event (highest ML score) with full-width image, gradient overlay, CTA, and "98% match" badge
 2. **"This Weekend" carousel** — horizontal scrollable cards for events happening this Fri-Sun, ML-ranked
@@ -219,7 +219,7 @@ The Dashboard (640 lines) needs to feel like a premium, ML-powered app homepage:
 7. **ML Taste Profile panel** — radar/spider chart of user's genre affinities (from Spotify + saved events), "Your discovery score", taste evolution over time
 8. **Quick stats with ML** — total events this week, match quality distribution, events saved, "X events match your taste this week"
 9. **Genre heatmap** — wire BetterHeatMap to show event density by genre/time, or user preference distribution
-10. **"Why This?" explainability** — every recommended card should have expandable explanation showing score breakdown (Spotify genre +2, saved venue +4, etc.)
+1<REDACTED_DB_PASSWORD>. **"Why This?" explainability** — every recommended card should have expandable explanation showing score breakdown (Spotify genre +2, saved venue +4, etc.)
 11. **Recommendation feedback** — thumbs up/down on each card, feeds `POST /v1/feedback`
 12. **A/B variant indicator** (subtle) — show which algorithm variant the user is in, for transparency
 
@@ -249,7 +249,7 @@ gigfinder-app/
 │   ├── App.jsx                    — Routes (dashboard, discover, djs, venues, organizer, preferences, auth)
 │   ├── index.css                  — Tailwind + CSS variables (dark theme, emerald accent)
 │   ├── pages/
-│   │   ├── Dashboard.jsx          — Main hub (640 lines) — NEEDS REDESIGN
+│   │   ├── Dashboard.jsx          — Main hub (64<REDACTED_DB_PASSWORD> lines) — NEEDS REDESIGN
 │   │   ├── CombinedGigs.jsx       — Event search & feed (553 lines)
 │   │   ├── DJs.jsx                — Artist discovery (387 lines)
 │   │   ├── Venues.jsx             — Venue search (564 lines)
@@ -346,10 +346,10 @@ ml-service/
 ## STYLING GUIDE
 
 **Theme:** Dark mode with Irish emerald accent
-**Primary color:** `--emerald: #00d67d`
+**Primary color:** `--emerald: #<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>d67d`
 **Accents:** Gold `#f5a623`, Coral `#ff4757`, Sky `#4fc3f7`, Violet `#a78bfa`
-**Backgrounds:** `#0a0a0a` (base), `#111` (surface), `#1a1a1a` (elevated)
-**Text:** `#f5f5f5` (primary), `#a0a0a0` (muted)
+**Backgrounds:** `#<REDACTED_DB_PASSWORD>a<REDACTED_DB_PASSWORD>a<REDACTED_DB_PASSWORD>a` (base), `#111` (surface), `#1a1a1a` (elevated)
+**Text:** `#f5f5f5` (primary), `#a<REDACTED_DB_PASSWORD>a<REDACTED_DB_PASSWORD>a<REDACTED_DB_PASSWORD>` (muted)
 **Font:** Inter
 **Border radius:** 12-16px for cards, 8px for buttons
 **Animations:** Framer Motion — fade-in + slide-up on card mount
@@ -374,18 +374,18 @@ ml-service/
 ### Frontend
 1. Make changes in `gigfinder-app/`
 2. Build: `REACT_APP_API_BASE=https://api.whatsthecraic.run.place react-scripts build`
-3. Deploy: `aws s3 sync build/ s3://wtc-ui-385017713886-eu-west-1/ --delete`
-4. Invalidate: `aws cloudfront create-invalidation --distribution-id E2HRBT0I8G9WPY --paths "/*"`
+3. Deploy: `aws s3 sync build/ s3://wtc-ui-385<REDACTED_DB_PASSWORD>17713886-eu-west-1/ --delete`
+4. Invalidate: `aws cloudfront create-invalidation --distribution-id E2HRBT<REDACTED_DB_PASSWORD>I8G9WPY --paths "/*"`
 
 ### Backend (per service)
 1. Build Docker image: `docker build -t whatsthecraic/<service> .`
-2. Tag: `docker tag whatsthecraic/<service> 385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/<service>:latest`
-3. Push: `docker push 385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/<service>:latest`
+2. Tag: `docker tag whatsthecraic/<service> 385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/<service>:latest`
+3. Push: `docker push 385<REDACTED_DB_PASSWORD>17713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/<service>:latest`
 4. Restart pod: `kubectl rollout restart deployment/<service> -n whatsthecraic`
 
 ### Via SSM (for remote execution)
 ```bash
-aws ssm send-command --instance-ids i-077f139e329506bf5 \
+aws ssm send-command --instance-ids i-<REDACTED_DB_PASSWORD>77f139e3295<REDACTED_DB_PASSWORD>6bf5 \
   --document-name AWS-RunShellScript \
   --parameters commands=["<base64-encoded-script> | base64 -d | bash"]
 ```
@@ -393,7 +393,7 @@ aws ssm send-command --instance-ids i-077f139e329506bf5 \
 ---
 
 ## COLLATION NOTE
-MariaDB 10.5 does NOT support `utf8mb4_0900_ai_ci`. All DDL must use `utf8mb4_general_ci`.
+MariaDB 1<REDACTED_DB_PASSWORD>.5 does NOT support `utf8mb4_<REDACTED_DB_PASSWORD>9<REDACTED_DB_PASSWORD><REDACTED_DB_PASSWORD>_ai_ci`. All DDL must use `utf8mb4_general_ci`.
 This was already fixed in `events-service/index.js`, `init-gigsdb.sql`, and `backup.sql`, but watch for it in any new migrations.
 
 ---
@@ -412,7 +412,7 @@ This was already fixed in `events-service/index.js`, `init-gigsdb.sql`, and `bac
 7. Add click tracking — instrument event card clicks to send `POST /v1/feedback` with action='click'
 8. Add thumbs up/down feedback buttons on recommended events → `POST /v1/feedback`
 9. Build "Why This?" explainability modal — show rank_reasons breakdown as a visual bar chart per event
-10. Build ML Taste Profile panel — radar chart of genre affinities from Spotify + saved events
+1<REDACTED_DB_PASSWORD>. Build ML Taste Profile panel — radar chart of genre affinities from Spotify + saved events
 11. Wire BetterHeatMap to real data — genre/day-of-week event density or preference distribution
 12. Build admin ML dashboard page (`/admin/ml`) — model health, A/B experiment results, retraining trigger
 
@@ -425,6 +425,6 @@ This was already fixed in `events-service/index.js`, `init-gigsdb.sql`, and `bac
 
 ### Phase 4: Deploy & Maintain
 18. Commit all changes to GitHub (fix .git/index.lock first)
-19. Update GitHub Actions secret `EC2_INSTANCE_ID` to `i-077f139e329506bf5`
-20. Set up ML model retraining cron job (daily or weekly)
+19. Update GitHub Actions secret `EC2_INSTANCE_ID` to `i-<REDACTED_DB_PASSWORD>77f139e3295<REDACTED_DB_PASSWORD>6bf5`
+2<REDACTED_DB_PASSWORD>. Set up ML model retraining cron job (daily or weekly)
 21. Rebuild and deploy all changed backend services to ECR + k8s
