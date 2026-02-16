@@ -1,71 +1,71 @@
-// src/components/BetterHeatMap.jsx
 import React from 'react';
-import { XYPlot, XAxis, YAxis, HeatmapSeries, LabelSeries } from 'react-vis';
-import 'react-vis/dist/style.css';
 
 const BetterHeatMap = ({ data, xLabels, width = 600, height = 150 }) => {
-  // Ensure data and xLabels are defined and have the same length
-  if (!data || !Array.isArray(data) || !xLabels || !Array.isArray(xLabels) || data.length !== xLabels.length || data.length === 0) {
+  if (!Array.isArray(data) || !Array.isArray(xLabels) || data.length !== xLabels.length || data.length === 0) {
     return null;
   }
 
-  // Filter out invalid values and ensure all labels are strings
-  const validLabels = xLabels.filter(label => label != null && String(label).trim() !== '');
-  const validData = data.filter(d => d != null && !isNaN(d));
+  const cells = xLabels
+    .map((label, index) => {
+      if (label == null || String(label).trim() === '') return null;
+      const numericValue = Number(data[index]);
+      if (Number.isNaN(numericValue)) return null;
+      return {
+        label: String(label),
+        value: Math.max(0, numericValue)
+      };
+    })
+    .filter(Boolean);
 
-  if (validLabels.length === 0 || validData.length === 0 || validLabels.length !== validData.length) {
+  if (cells.length === 0) {
     return null;
   }
 
-  // Convert one-row data into an array of objects for the heatmap
-  const cells = validLabels.map((label, index) => ({
-    x: String(label), // Ensure label is a string
-    y: 0, // single row
-    value: Math.max(0, Number(validData[index]) || 0), // Ensure positive number
-  }));
+  const maxVal = Math.max(1, ...cells.map(cell => cell.value));
+  const minColumnWidth = 56;
+  const gridWidth = Math.max(width, cells.length * minColumnWidth);
+  const barMaxHeight = Math.max(42, height - 56);
 
-  // Determine the maximum value for color scaling
-  const maxVal = Math.max(1, ...validData.map(v => Math.max(0, Number(v) || 0)));
-
-  // Final safety check - ensure cells is not empty
-  if (!cells || cells.length === 0) {
-    return null;
-  }
-
-  // Ensure all cells have valid x values for XAxis
-  const hasValidX = cells.every(cell => cell.x != null && String(cell.x).trim() !== '');
-  if (!hasValidX) {
-    return null;
-  }
-
-  try {
-    return (
-      <XYPlot
-        xType="ordinal"
-        width={width}
-        height={height}
-        margin={{ left: 50, right: 50, top: 10, bottom: 50 }}
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <div
+        style={{
+          minWidth: `${gridWidth}px`,
+          display: 'grid',
+          gridTemplateColumns: `repeat(${cells.length}, minmax(${minColumnWidth}px, 1fr))`,
+          gap: '0.45rem',
+          alignItems: 'end'
+        }}
       >
-        <XAxis />
-        <YAxis hideLine hideTicks />
-        <HeatmapSeries
-          className="heatmap-series-example"
-          data={cells}
-          colorRange={['#e0f3db', '#43a2ca']}
-          style={{ stroke: '#fff', strokeWidth: '2px' }}
-        />
-        <LabelSeries
-          data={cells.map(cell => ({ ...cell, label: String(cell.value) }))}
-          labelAnchorX="middle"
-          labelAnchorY="baseline"
-          style={{ fontSize: '14px', fill: '#000' }}
-        />
-      </XYPlot>
-    );
-  } catch (error) {
-    console.warn('BetterHeatMap render error:', error);
-    return null;
-  }
+        {cells.map((cell, index) => {
+          const ratio = maxVal > 0 ? cell.value / maxVal : 0;
+          const barHeight = Math.max(8, Math.round(ratio * barMaxHeight));
+          const alpha = 0.2 + (ratio * 0.75);
+
+          return (
+            <div key={`${cell.label}-${index}`} style={{ textAlign: 'center' }}>
+              <div
+                style={{
+                  height: `${barHeight}px`,
+                  borderRadius: 8,
+                  background: `rgba(67, 162, 202, ${alpha.toFixed(3)})`,
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  transition: 'height 220ms ease'
+                }}
+                title={`${cell.label}: ${cell.value}`}
+              />
+              <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: '#f5a623', fontWeight: 700 }}>
+                {cell.value}
+              </div>
+              <div style={{ marginTop: '0.15rem', fontSize: '0.72rem', color: '#a0a0a0' }}>
+                {cell.label}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 };
 
 export default BetterHeatMap;

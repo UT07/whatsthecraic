@@ -11,6 +11,8 @@ import logging
 import time
 from datetime import datetime
 import os
+import base64
+import json
 
 from .models.recommendation_engine import RecommendationEngine
 from .ab_testing import ABTestManager
@@ -45,9 +47,43 @@ recommendation_engine = RecommendationEngine()
 ab_test_manager = ABTestManager()
 metrics_collector = MetricsCollector()
 
+def decode_jwt_payload(token: str) -> Optional[Dict[str, Any]]:
+    """Decode JWT payload without signature verification."""
+    try:
+        parts = token.split('.')
+        if len(parts) < 2:
+            return None
+
+        payload = parts[1].replace('-', '+').replace('_', '/')
+        padding = '=' * (-len(payload) % 4)
+        decoded = base64.b64decode((payload + padding).encode('utf-8'))
+        data = json.loads(decoded.decode('utf-8'))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+def resolve_user_id(request_user_id: Optional[str], authorization: Optional[str]) -> Optional[str]:
+    if request_user_id is not None and str(request_user_id).strip() != '':
+        return str(request_user_id)
+
+    if not authorization or not authorization.startswith('Bearer '):
+        return None
+
+    token = authorization.split(' ', 1)[1].strip()
+    payload = decode_jwt_payload(token)
+    if not payload:
+        return None
+
+    for key in ('user_id', 'id', 'sub'):
+        value = payload.get(key)
+        if value is not None and str(value).strip() != '':
+            return str(value)
+
+    return None
+
 # Request/Response Models
 class RecommendationRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
     city: Optional[str] = None
     limit: int = 20
     context: Optional[Dict[str, Any]] = None
@@ -60,7 +96,7 @@ class RecommendationResponse(BaseModel):
     latency_ms: float
 
 class FeedbackRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
     event_id: str
     action: str  # 'save', 'hide', 'click', 'skip'
     context: Optional[Dict[str, Any]] = None
@@ -146,13 +182,18 @@ async def get_recommendations(
     """
     start_time = time.time()
 
+    resolved_user_id = resolve_user_id(request.user_id, authorization)
+
+    if not resolved_user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
     try:
         # A/B test assignment
-        experiment = ab_test_manager.assign_experiment(request.user_id)
+        experiment = ab_test_manager.assign_experiment(resolved_user_id)
 
         # Get recommendations based on experiment variant
         recommendations = recommendation_engine.predict(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             city=request.city,
             limit=request.limit,
             variant=experiment.get('variant', 'control'),
@@ -162,14 +203,14 @@ async def get_recommendations(
         # Record prediction
         latency_ms = (time.time() - start_time) * 1000
         metrics_collector.record_prediction(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             variant=experiment.get('variant', 'control'),
             latency_ms=latency_ms,
             num_recommendations=len(recommendations)
         )
 
         return RecommendationResponse(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             recommendations=recommendations,
             model_version=recommendation_engine.model_version,
             ab_experiment=experiment.get('experiment_id'),
@@ -177,20 +218,27 @@ async def get_recommendations(
         )
 
     except Exception as e:
-        logger.error(f"Error getting recommendations for user {request.user_id}: {e}")
+        logger.error(f"Error getting recommendations for user {resolved_user_id}: {e}")
         metrics_collector.record_error('recommendation_error')
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/v1/feedback")
-async def record_feedback(request: FeedbackRequest):
+async def record_feedback(
+    request: FeedbackRequest,
+    authorization: Optional[str] = Header(None)
+):
     """
     Record user feedback for model improvement
     Used for online learning and model retraining
     """
     try:
         # Store feedback for model retraining
+        resolved_user_id = resolve_user_id(request.user_id, authorization)
+        if not resolved_user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
+
         recommendation_engine.record_feedback(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             event_id=request.event_id,
             action=request.action,
             context=request.context
@@ -199,7 +247,7 @@ async def record_feedback(request: FeedbackRequest):
         # Track A/B test conversion
         if request.action in ['save', 'click']:
             ab_test_manager.record_conversion(
-                user_id=request.user_id,
+                user_id=resolved_user_id,
                 event_id=request.event_id,
                 action=request.action
             )

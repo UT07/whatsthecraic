@@ -1,10 +1,48 @@
-import { apiClient, getUser } from './apiClient';
+import { apiClient, getToken, getUser } from './apiClient';
 
 /**
  * ML Service API Client
  * Connects to ml-service endpoints via aggregator for personalized recommendations,
  * feedback tracking, model information, and A/B experiment management.
  */
+
+const decodeJwtPayload = (token) => {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length < 2) return null;
+
+  try {
+    const rawPayload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = rawPayload.padEnd(Math.ceil(rawPayload.length / 4) * 4, '=');
+    if (typeof atob !== 'function') return null;
+    return JSON.parse(atob(paddedPayload));
+  } catch {
+    return null;
+  }
+};
+
+const resolveUserId = (explicitUserId) => {
+  const user = getUser();
+  const token = getToken();
+  const tokenPayload = decodeJwtPayload(token);
+  const resolved = explicitUserId
+    || user?.id
+    || user?.user_id
+    || user?.userId
+    || tokenPayload?.user_id
+    || tokenPayload?.id
+    || tokenPayload?.sub;
+
+  if (resolved === undefined || resolved === null || resolved === '') return null;
+  return String(resolved);
+};
+
+const emptyRecommendations = (error = 'ml_unavailable') => ({
+  recommendations: [],
+  model_version: 'unavailable',
+  ab_experiment: null,
+  error
+});
 
 const mlAPI = {
   /**
@@ -18,9 +56,13 @@ const mlAPI = {
    */
   getRecommendations: async ({ userId, city, limit = 20, context = {} } = {}) => {
     try {
-      const user = getUser();
+      const resolvedUserId = resolveUserId(userId);
+      if (!resolvedUserId) {
+        return emptyRecommendations('missing_user_id');
+      }
+
       const payload = {
-        user_id: userId || user?.id || user?.user_id,
+        user_id: resolvedUserId,
         city,
         limit,
         context
@@ -31,12 +73,7 @@ const mlAPI = {
     } catch (error) {
       console.error('ML recommendations error:', error);
       // Return empty recommendations on error to degrade gracefully
-      return {
-        recommendations: [],
-        model_version: 'unavailable',
-        ab_experiment: null,
-        error: error.message
-      };
+      return emptyRecommendations(error.message);
     }
   },
 
@@ -51,9 +88,13 @@ const mlAPI = {
    */
   sendFeedback: async ({ userId, eventId, action, context = {} } = {}) => {
     try {
-      const user = getUser();
+      const resolvedUserId = resolveUserId(userId);
+      if (!resolvedUserId || !eventId || !action) {
+        return { success: false, error: 'missing_feedback_fields' };
+      }
+
       const payload = {
-        user_id: userId || user?.id || user?.user_id,
+        user_id: resolvedUserId,
         event_id: eventId,
         action,
         context: {
