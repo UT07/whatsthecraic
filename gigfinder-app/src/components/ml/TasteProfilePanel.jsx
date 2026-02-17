@@ -57,7 +57,7 @@ const normalizePercent = (value, max) => {
   return Math.round((Number(value || 0) / max) * 100);
 };
 
-const TasteProfilePanel = () => {
+const TasteProfilePanel = ({ reloadToken = '' }) => {
   const [spotifyProfile, setSpotifyProfile] = useState(null);
   const [soundcloudProfile, setSoundcloudProfile] = useState(null);
   const [savedEvents, setSavedEvents] = useState([]);
@@ -82,7 +82,7 @@ const TasteProfilePanel = () => {
       }
     };
     loadData();
-  }, []);
+  }, [reloadToken]);
 
   if (loading) {
     return (
@@ -108,12 +108,13 @@ const TasteProfilePanel = () => {
   })();
 
   const combinedGenreMap = (() => {
+    const streamingWeight = 2;
     const map = new Map();
     spotifyGenreMap.forEach((value, genre) => {
-      map.set(genre, (map.get(genre) || 0) + (value * 2));
+      map.set(genre, (map.get(genre) || 0) + (value * streamingWeight));
     });
     soundcloudGenreMap.forEach((value, genre) => {
-      map.set(genre, (map.get(genre) || 0) + Math.round(value * 1.8));
+      map.set(genre, (map.get(genre) || 0) + (value * streamingWeight));
     });
     savedGenreMap.forEach((value, genre) => {
       map.set(genre, (map.get(genre) || 0) + value);

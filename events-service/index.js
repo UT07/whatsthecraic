@@ -769,6 +769,29 @@ const extractNameList = (items) => {
   );
 };
 
+const extractGenreList = (items) => {
+  if (!Array.isArray(items)) return [];
+  return dedupeList(
+    items
+      .flatMap((item) => {
+        if (typeof item === 'string') return [item.trim()];
+        if (item && typeof item === 'object') {
+          const raw = item.genre || item.name || item.tag || '';
+          if (!raw) return [];
+          if (typeof raw === 'string') {
+            return raw
+              .split(/[/,|]+/)
+              .map(token => token.trim())
+              .filter(Boolean);
+          }
+          return [String(raw).trim()];
+        }
+        return [];
+      })
+      .filter(Boolean)
+  );
+};
+
 const buildPerformerSearchQuery = (signals, fallback = 'live dj set electronic house techno') => {
   const artists = dedupeList([
     ...(signals?.preferredArtists || []),
@@ -1031,6 +1054,10 @@ const getUserSignals = async (userId) => {
     'SELECT top_genres, top_artists FROM user_spotify WHERE user_id = ?',
     [userId]
   );
+  const [soundcloudRows] = await pool.query(
+    'SELECT top_genres, top_artists FROM user_soundcloud WHERE user_id = ?',
+    [userId]
+  );
 
   const prefRow = prefRows.length ? prefRows[0] : {};
   const preferredGenres = parseJson(prefRow.preferred_genres);
@@ -1048,16 +1075,26 @@ const getUserSignals = async (userId) => {
   const nightPreferences = parseJson(prefRow.night_preferences);
   const spotifyGenresRaw = spotifyRows.length ? parseJson(spotifyRows[0].top_genres) : [];
   const spotifyArtistsRaw = spotifyRows.length ? parseJson(spotifyRows[0].top_artists) : [];
+  const soundcloudGenresRaw = soundcloudRows.length ? parseJson(soundcloudRows[0].top_genres) : [];
+  const soundcloudArtistsRaw = soundcloudRows.length ? parseJson(soundcloudRows[0].top_artists) : [];
   const spotifyArtistNames = extractNameList(spotifyArtistsRaw);
+  const soundcloudArtistNames = extractNameList(soundcloudArtistsRaw);
   const spotifyGenres = Array.isArray(spotifyGenresRaw)
-    ? spotifyGenresRaw.map(item => normalizeToken(item.genre || item)).filter(Boolean)
+    ? extractGenreList(spotifyGenresRaw).map(item => normalizeToken(item)).filter(Boolean)
+    : [];
+  const soundcloudGenresFromProfile = Array.isArray(soundcloudGenresRaw)
+    ? extractGenreList(soundcloudGenresRaw).map(item => normalizeToken(item)).filter(Boolean)
     : [];
   const spotifyArtists = spotifyArtistNames
     .map(item => normalizeToken(item))
     .filter(Boolean);
+  const soundcloudArtistsFromProfile = soundcloudArtistNames
+    .map(item => normalizeToken(item))
+    .filter(Boolean);
   const soundcloudSignals = await getSoundcloudTasteSignals([
     ...spotifyArtistNames,
-    ...preferredArtistNames
+    ...preferredArtistNames,
+    ...soundcloudArtistNames
   ]);
 
   const [savedRows] = await pool.query(
@@ -1105,8 +1142,14 @@ const getUserSignals = async (userId) => {
     nightPreferences: nightPreferences.map(normalizeToken).filter(Boolean),
     spotifyGenres,
     spotifyArtists,
-    soundcloudGenres: soundcloudSignals.soundcloudGenres || [],
-    soundcloudArtists: soundcloudSignals.soundcloudArtists || [],
+    soundcloudGenres: dedupeList([
+      ...soundcloudGenresFromProfile,
+      ...(soundcloudSignals.soundcloudGenres || [])
+    ]).map(normalizeToken).filter(Boolean),
+    soundcloudArtists: dedupeList([
+      ...soundcloudArtistsFromProfile,
+      ...(soundcloudSignals.soundcloudArtists || [])
+    ]).map(normalizeToken).filter(Boolean),
     savedGenres: Array.from(savedGenres),
     savedCities: Array.from(savedCities),
     savedVenues: Array.from(savedVenues),
@@ -1195,7 +1238,7 @@ const scoreEventRow = (row, signals) => {
 
   const soundcloudGenreMatches = expandedEventGenres.filter(g => (signals.soundcloudGenres || []).includes(g));
   if (soundcloudGenreMatches.length > 0) {
-    score += Math.min(soundcloudGenreMatches.length, 4) * 2;
+    score += Math.min(soundcloudGenreMatches.length, 5) * 2;
     reasons.push({ type: 'soundcloud_genre', values: soundcloudGenreMatches.slice(0, 3) });
   }
 
@@ -1219,7 +1262,7 @@ const scoreEventRow = (row, signals) => {
     artist && (title.includes(artist) || description.includes(artist))
   );
   if (soundcloudArtistMatches.length > 0) {
-    score += soundcloudArtistMatches.length * 3;
+    score += soundcloudArtistMatches.length * 4;
     reasons.push({ type: 'soundcloud_artist', values: soundcloudArtistMatches.slice(0, 3) });
   }
 

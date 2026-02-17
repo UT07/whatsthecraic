@@ -41,7 +41,9 @@ const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI;
 const SPOTIFY_SCOPES = process.env.SPOTIFY_SCOPES || 'user-top-read user-follow-read user-library-read user-read-email';
 const SOUNDCLOUD_CLIENT_ID = process.env.SOUNDCLOUD_CLIENT_ID || null;
+const SOUNDCLOUD_CLIENT_SECRET = process.env.SOUNDCLOUD_CLIENT_SECRET || null;
 const SOUNDCLOUD_GENRE_TAG_LIMIT = Number.parseInt(process.env.SOUNDCLOUD_GENRE_TAG_LIMIT || '20', 10);
+const SOUNDCLOUD_SYNC_CACHE_TTL_MS = Number.parseInt(process.env.SOUNDCLOUD_SYNC_CACHE_TTL_MS || `${20 * 60 * 1000}`, 10);
 const SOUNDCLOUD_HTTP_CACHE_TTL_MS = Number.parseInt(process.env.SOUNDCLOUD_HTTP_CACHE_TTL_MS || `${10 * 60 * 1000}`, 10);
 const SOUNDCLOUD_HTTP_STALE_MS = Number.parseInt(process.env.SOUNDCLOUD_HTTP_STALE_MS || `${5 * 60 * 1000}`, 10);
 const SOUNDCLOUD_HTTP_BACKOFF_MS = Number.parseInt(process.env.SOUNDCLOUD_HTTP_BACKOFF_MS || '60000', 10);
@@ -60,6 +62,12 @@ const warnOnMissingEnv = () => {
   if (!SPOTIFY_CLIENT_ID) warnings.push('SPOTIFY_CLIENT_ID not set');
   if (!SPOTIFY_CLIENT_SECRET) warnings.push('SPOTIFY_CLIENT_SECRET not set');
   if (!SPOTIFY_REDIRECT_URI) warnings.push('SPOTIFY_REDIRECT_URI not set');
+  if (SOUNDCLOUD_CLIENT_ID && !SOUNDCLOUD_CLIENT_SECRET) {
+    warnings.push('SOUNDCLOUD_CLIENT_SECRET not set; SoundCloud enrichment quality/caching can be limited');
+  }
+  if (SOUNDCLOUD_CLIENT_SECRET && !SOUNDCLOUD_CLIENT_ID) {
+    warnings.push('SOUNDCLOUD_CLIENT_ID not set');
+  }
 
   const messages = [];
   if (missing.length) messages.push(`Missing required env: ${missing.join(', ')}`);
@@ -631,8 +639,107 @@ const parseJsonField = (value, fallback = []) => {
   }
 };
 
+const serializeSoundcloudProfile = (row, overrides = {}) => ({
+  synced: true,
+  username: overrides.username ?? row?.username ?? null,
+  permalink_url: overrides.permalink_url ?? row?.permalink_url ?? null,
+  avatar_url: overrides.avatar_url ?? row?.avatar_url ?? null,
+  top_artists: overrides.top_artists ?? parseJsonField(row?.top_artists, []),
+  top_genres: overrides.top_genres ?? parseJsonField(row?.top_genres, [])
+});
+
+const isSoundcloudSyncFresh = (value) => {
+  if (!value || SOUNDCLOUD_SYNC_CACHE_TTL_MS <= 0) return false;
+  const syncedAt = new Date(value).getTime();
+  if (Number.isNaN(syncedAt)) return false;
+  return (Date.now() - syncedAt) <= SOUNDCLOUD_SYNC_CACHE_TTL_MS;
+};
+
+const isHttpUrl = (value) => value.startsWith('http://') || value.startsWith('https://');
+
+const extractSoundcloudIdentity = (value) => {
+  const normalized = normalizeSoundcloudProfileInput(value);
+  if (!normalized) return '';
+  if (isHttpUrl(normalized)) {
+    try {
+      const parsed = new URL(normalized);
+      const path = parsed.pathname.split('/').filter(Boolean)[0] || '';
+      return normalizeSoundcloudToken(path);
+    } catch {
+      return normalizeSoundcloudToken(normalized);
+    }
+  }
+  return normalizeSoundcloudToken(normalized);
+};
+
+const isSameSoundcloudProfile = (row, profileInput) => {
+  const incoming = extractSoundcloudIdentity(profileInput);
+  if (!incoming) return false;
+  const rowUsername = normalizeSoundcloudToken(row?.username);
+  const rowPermalink = extractSoundcloudIdentity(row?.permalink_url);
+  return incoming === rowUsername || incoming === rowPermalink;
+};
+
+const getSoundcloudUserLookupId = (user) => {
+  const raw = user?.id ?? user?.urn;
+  if (raw === null || raw === undefined) return null;
+  const text = String(raw).trim();
+  if (!text) return null;
+  if (text.includes(':')) {
+    const parts = text.split(':').filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : null;
+  }
+  return text;
+};
+
+const getSoundcloudPersistedUserId = (user) => {
+  const lookupId = getSoundcloudUserLookupId(user);
+  if (!lookupId) return null;
+  return /^\d+$/.test(lookupId) ? lookupId : null;
+};
+
+const getSoundcloudCollection = (response) =>
+  Array.isArray(response?.collection) ? response.collection : [];
+
+const toSoundcloudTrack = (item) => {
+  if (!item || typeof item !== 'object') return null;
+  if (item.track && typeof item.track === 'object') return item.track;
+  if (item.sound && typeof item.sound === 'object') return item.sound;
+  if (item.kind === 'track' || item.type === 'track' || item.streamable !== undefined || item.title) {
+    return item;
+  }
+  return null;
+};
+
+const extractTracksFromSoundcloudLikes = (response) => {
+  const tracks = [];
+  getSoundcloudCollection(response).forEach((entry) => {
+    const track = toSoundcloudTrack(entry);
+    if (track) tracks.push(track);
+  });
+  return tracks;
+};
+
+const mergeSoundcloudTracks = (...trackLists) => {
+  const byKey = new Map();
+  trackLists.forEach((list) => {
+    (Array.isArray(list) ? list : []).forEach((track) => {
+      const idKey = (track?.id ?? track?.urn ?? '').toString().trim();
+      const permalinkKey = normalizeSoundcloudToken(track?.permalink_url);
+      const titleKey = normalizeSoundcloudToken(track?.title);
+      const userKey = normalizeSoundcloudToken(track?.user?.username || track?.publisher_metadata?.artist);
+      const fallbackKey = `${titleKey}|${userKey}`;
+      const key = idKey || permalinkKey || fallbackKey;
+      if (!key || byKey.has(key)) return;
+      byKey.set(key, track);
+    });
+  });
+  return Array.from(byKey.values());
+};
+
 const syncSoundcloudProfile = async (userId, profileInput = null) => {
   const normalizedInput = normalizeSoundcloudProfileInput(profileInput);
+  const existing = await getSoundcloudProfile(userId);
   if (!soundcloudConfigured()) {
     if (!normalizedInput) {
       const error = new Error('SoundCloud is not configured');
@@ -655,6 +762,20 @@ const syncSoundcloudProfile = async (userId, profileInput = null) => {
     };
   }
 
+  if (existing && normalizedInput && isSameSoundcloudProfile(existing, normalizedInput) && isSoundcloudSyncFresh(existing.last_synced_at)) {
+    return {
+      ...serializeSoundcloudProfile(existing),
+      cached: true
+    };
+  }
+
+  if (existing && !normalizedInput && isSoundcloudSyncFresh(existing.last_synced_at)) {
+    return {
+      ...serializeSoundcloudProfile(existing),
+      cached: true
+    };
+  }
+
   let user = null;
   if (normalizedInput) {
     try {
@@ -662,6 +783,13 @@ const syncSoundcloudProfile = async (userId, profileInput = null) => {
     } catch (err) {
       const status = Number(err?.status || 0);
       if ([401, 403, 404, 429].includes(status)) {
+        if (existing && isSameSoundcloudProfile(existing, normalizedInput)) {
+          return {
+            ...serializeSoundcloudProfile(existing),
+            cached: true,
+            degraded: true
+          };
+        }
         const fallbackProfile = buildSoundcloudFallbackProfile(normalizedInput);
         await upsertSoundcloudProfile({
           userId,
@@ -680,23 +808,66 @@ const syncSoundcloudProfile = async (userId, profileInput = null) => {
       throw err;
     }
   } else {
-    const existing = await getSoundcloudProfile(userId);
     if (!existing) {
       return { synced: false, reason: 'not_linked' };
     }
-    user = await resolveSoundcloudUser(existing.permalink_url || existing.username);
+    try {
+      user = await resolveSoundcloudUser(existing.permalink_url || existing.username);
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      if ([401, 403, 404, 429].includes(status)) {
+        return {
+          ...serializeSoundcloudProfile(existing),
+          cached: true,
+          degraded: true
+        };
+      }
+      throw err;
+    }
   }
 
-  const tracksResponse = await fetchSoundcloudJson(
-    `https://api-v2.soundcloud.com/users/${encodeURIComponent(String(user.id))}/tracks?limit=200`
-  );
-  const tracks = Array.isArray(tracksResponse?.collection) ? tracksResponse.collection : [];
-  const topGenres = computeSoundcloudTopGenres(tracks);
-  const topArtists = computeSoundcloudTopArtists(tracks, user.username || user.full_name);
+  const lookupId = getSoundcloudUserLookupId(user);
+  if (!lookupId) {
+    if (existing) {
+      return {
+        ...serializeSoundcloudProfile(existing),
+        cached: true,
+        degraded: true
+      };
+    }
+    const error = new Error('Could not resolve SoundCloud user id');
+    error.status = 502;
+    throw error;
+  }
+
+  const encodedId = encodeURIComponent(lookupId);
+  const [tracksResult, likesResult, trackLikesResult] = await Promise.allSettled([
+    fetchSoundcloudJson(`https://api-v2.soundcloud.com/users/${encodedId}/tracks?limit=200`),
+    fetchSoundcloudJson(`https://api-v2.soundcloud.com/users/${encodedId}/likes?limit=200`),
+    fetchSoundcloudJson(`https://api-v2.soundcloud.com/users/${encodedId}/track_likes?limit=200`)
+  ]);
+
+  const ownTracks = tracksResult.status === 'fulfilled' ? getSoundcloudCollection(tracksResult.value) : [];
+  const likedTracks = [
+    ...(likesResult.status === 'fulfilled' ? extractTracksFromSoundcloudLikes(likesResult.value) : []),
+    ...(trackLikesResult.status === 'fulfilled' ? extractTracksFromSoundcloudLikes(trackLikesResult.value) : [])
+  ];
+  const mergedTracks = mergeSoundcloudTracks(ownTracks, likedTracks);
+
+  if (mergedTracks.length === 0 && existing) {
+    return {
+      ...serializeSoundcloudProfile(existing),
+      cached: true,
+      degraded: true
+    };
+  }
+
+  const topGenres = computeSoundcloudTopGenres(mergedTracks);
+  const topArtists = computeSoundcloudTopArtists(mergedTracks, user.username || user.full_name);
 
   await upsertSoundcloudProfile({
     userId,
-    soundcloudUserId: user.id,
+    soundcloudUserId: getSoundcloudPersistedUserId(user),
     username: user.username || user.permalink || null,
     permalinkUrl: user.permalink_url || null,
     avatarUrl: user.avatar_url || null,

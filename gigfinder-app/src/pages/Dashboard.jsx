@@ -1004,7 +1004,9 @@ const Dashboard = () => {
 
       {/* ─── TASTE PROFILE PANEL ─── */}
       {token && (spotifyStatus?.linked || soundcloudStatus?.linked) && (
-        <TasteProfilePanel />
+        <TasteProfilePanel
+          reloadToken={`${spotifyStatus?.last_synced_at || ''}|${soundcloudStatus?.last_synced_at || ''}|${savedIds.size}`}
+        />
       )}
 
       {/* ─── MIXCLOUD LIVE STREAMS ─── */}
