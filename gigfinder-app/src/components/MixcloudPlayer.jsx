@@ -128,7 +128,9 @@ const MixcloudPlayer = ({ mixcloudUrl, artistName, autoplay = false, width = '10
         src={iframeSrc}
         frameBorder="0"
         title="Mixcloud Player"
-        allow="autoplay"
+        allow="autoplay; encrypted-media"
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
         style={{ display: 'block' }}
       />
     </div>
