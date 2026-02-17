@@ -42,6 +42,12 @@ const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI;
 const SPOTIFY_SCOPES = process.env.SPOTIFY_SCOPES || 'user-top-read user-follow-read user-library-read user-read-email';
 const SOUNDCLOUD_CLIENT_ID = process.env.SOUNDCLOUD_CLIENT_ID || null;
 const SOUNDCLOUD_GENRE_TAG_LIMIT = Number.parseInt(process.env.SOUNDCLOUD_GENRE_TAG_LIMIT || '20', 10);
+const SOUNDCLOUD_HTTP_CACHE_TTL_MS = Number.parseInt(process.env.SOUNDCLOUD_HTTP_CACHE_TTL_MS || `${10 * 60 * 1000}`, 10);
+const SOUNDCLOUD_HTTP_STALE_MS = Number.parseInt(process.env.SOUNDCLOUD_HTTP_STALE_MS || `${5 * 60 * 1000}`, 10);
+const SOUNDCLOUD_HTTP_BACKOFF_MS = Number.parseInt(process.env.SOUNDCLOUD_HTTP_BACKOFF_MS || '60000', 10);
+const SOUNDCLOUD_HTTP_RETRY_ATTEMPTS = Number.parseInt(process.env.SOUNDCLOUD_HTTP_RETRY_ATTEMPTS || '2', 10);
+const soundcloudHttpCache = new Map();
+const soundcloudHttpInFlight = new Map();
 
 const warnOnMissingEnv = () => {
   const missing = [];
@@ -309,6 +315,30 @@ const normalizeSoundcloudToken = (value) => (value || '')
   .toLowerCase()
   .trim();
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const parseRetryAfterMs = (value) => {
+  if (!value) return null;
+  if (/^\d+$/.test(String(value).trim())) {
+    return Math.max(Number.parseInt(value, 10) * 1000, 0);
+  }
+  const dateMs = Date.parse(value);
+  if (Number.isNaN(dateMs)) return null;
+  return Math.max(dateMs - Date.now(), 0);
+};
+
+const isRetryableSoundcloudError = (status) => status === 429 || status >= 500;
+
+const cleanupSoundcloudHttpCache = () => {
+  if (soundcloudHttpCache.size <= 1000) return;
+  const now = Date.now();
+  for (const [key, value] of soundcloudHttpCache.entries()) {
+    if ((value?.staleUntil || 0) <= now) {
+      soundcloudHttpCache.delete(key);
+    }
+  }
+};
+
 const normalizeSoundcloudProfileInput = (value) => {
   const input = (value || '').toString().trim();
   if (!input) return '';
@@ -367,27 +397,75 @@ const fetchSoundcloudJson = async (url) => {
 
   const parsed = new URL(url);
   parsed.searchParams.set('client_id', SOUNDCLOUD_CLIENT_ID);
+  const requestUrl = parsed.toString();
+  const now = Date.now();
+  const cached = soundcloudHttpCache.get(requestUrl);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
 
-  const res = await fetch(parsed.toString(), {
-    headers: { Accept: 'application/json' }
-  });
-  const text = await res.text();
-  let data = {};
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { raw: text };
+  if (soundcloudHttpInFlight.has(requestUrl)) {
+    return soundcloudHttpInFlight.get(requestUrl);
+  }
+
+  const task = (async () => {
+    let attempt = 0;
+    while (true) {
+      const res = await fetch(requestUrl, {
+        headers: { Accept: 'application/json' }
+      });
+      const text = await res.text();
+      let data = {};
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { raw: text };
+        }
+      }
+
+      if (res.ok) {
+        const createdAt = Date.now();
+        soundcloudHttpCache.set(requestUrl, {
+          value: data,
+          expiresAt: createdAt + SOUNDCLOUD_HTTP_CACHE_TTL_MS,
+          staleUntil: createdAt + SOUNDCLOUD_HTTP_CACHE_TTL_MS + SOUNDCLOUD_HTTP_STALE_MS
+        });
+        cleanupSoundcloudHttpCache();
+        return data;
+      }
+
+      const status = Number(res.status || 0);
+      const message = data.error_message || data.error?.message || data.error || 'SoundCloud API error';
+      if (isRetryableSoundcloudError(status) && attempt < SOUNDCLOUD_HTTP_RETRY_ATTEMPTS) {
+        const retryAfter = parseRetryAfterMs(res.headers.get('retry-after'));
+        const backoff = retryAfter ?? Math.min(SOUNDCLOUD_HTTP_BACKOFF_MS * (attempt + 1), 120000);
+        const jitter = Math.floor(Math.random() * 250);
+        await sleep(backoff + jitter);
+        attempt += 1;
+        continue;
+      }
+
+      const error = new Error(message);
+      error.status = status || 500;
+      error.data = data;
+      throw error;
     }
-  }
-  if (!res.ok) {
-    const message = data.error_message || data.error?.message || data.error || 'SoundCloud API error';
-    const error = new Error(message);
-    error.status = res.status;
-    error.data = data;
-    throw error;
-  }
-  return data;
+  })()
+    .catch((err) => {
+      const stale = soundcloudHttpCache.get(requestUrl);
+      if (stale && stale.staleUntil > Date.now()) {
+        console.warn(`[auth-service] serving stale SoundCloud cache for ${requestUrl}`);
+        return stale.value;
+      }
+      throw err;
+    })
+    .finally(() => {
+      soundcloudHttpInFlight.delete(requestUrl);
+    });
+
+  soundcloudHttpInFlight.set(requestUrl, task);
+  return task;
 };
 
 const resolveSoundcloudUser = async (profileInput) => {

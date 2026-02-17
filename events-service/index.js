@@ -806,6 +806,19 @@ const tokenizeSearchQuery = (value) => {
 
 const SOUNDCLOUD_SIGNAL_CACHE_TTL_MS = Number.parseInt(process.env.SOUNDCLOUD_SIGNAL_TTL_MS || '21600000', 10);
 const soundcloudSignalCache = new Map();
+const PERFORMERS_CACHE_TTL_MS = Number.parseInt(process.env.PERFORMERS_CACHE_TTL_MS || '120000', 10);
+const PERFORMERS_CACHE_MAX = Number.parseInt(process.env.PERFORMERS_CACHE_MAX || '750', 10);
+const performersResponseCache = new Map();
+
+const cleanupPerformersCache = () => {
+  if (performersResponseCache.size <= PERFORMERS_CACHE_MAX) return;
+  const now = Date.now();
+  for (const [cacheKey, entry] of performersResponseCache.entries()) {
+    if ((entry?.expiresAt || 0) <= now) {
+      performersResponseCache.delete(cacheKey);
+    }
+  }
+};
 
 const getSoundcloudTasteSignals = async (artistNames) => {
   if (!SOUNDCLOUD_ENABLED || !SOUNDCLOUD_CLIENT_ID) {
@@ -1692,12 +1705,14 @@ app.get('/v1/performers', async (req, res) => {
   const cityToken = city ? normalizeToken(city) : '';
 
   let performerSignals = null;
+  let requesterUserId = null;
   const authHeader = req.headers.authorization || '';
   if (authHeader.startsWith('Bearer ')) {
     try {
       const payload = jwt.verify(authHeader.slice(7), JWT_SECRET);
       const userId = payload?.user_id || null;
       if (userId) {
+        requesterUserId = String(userId);
         performerSignals = await getUserSignals(userId);
       }
     } catch {
@@ -1706,6 +1721,19 @@ app.get('/v1/performers', async (req, res) => {
   }
 
   const tasteQuery = keyword || buildPerformerSearchQuery(performerSignals, 'live dj set electronic house techno');
+  const performerCacheKey = [
+    `u:${requesterUserId || 'anon'}`,
+    `i:${Array.from(includeSet).sort().join(',')}`,
+    `c:${cityToken || ''}`,
+    `q:${keyword || ''}`,
+    `f:${fromDate.toISOString().slice(0, 10)}`,
+    `t:${toDate.toISOString().slice(0, 10)}`,
+    `l:${limitValue}`
+  ].join('|');
+  const cachedPayload = performersResponseCache.get(performerCacheKey);
+  if (cachedPayload && cachedPayload.expiresAt > Date.now()) {
+    return res.json(cachedPayload.value);
+  }
 
   const performers = [];
 
@@ -1980,8 +2008,14 @@ app.get('/v1/performers', async (req, res) => {
   }
 
   deduped = deduped.slice(0, limitValue);
+  const payload = { performers: deduped, count: deduped.length };
+  performersResponseCache.set(performerCacheKey, {
+    value: payload,
+    expiresAt: Date.now() + PERFORMERS_CACHE_TTL_MS
+  });
+  cleanupPerformersCache();
 
-  return res.json({ performers: deduped, count: deduped.length });
+  return res.json(payload);
 });
 
 app.get('/v1/users/me/feed', requireAuth, async (req, res) => {

@@ -4,7 +4,12 @@ const SOUNDCLOUD_API = 'https://api-v2.soundcloud.com';
 const http = axios.create({ timeout: 10000 });
 
 const cache = new Map();
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const inFlight = new Map();
+const CACHE_TTL_MS = Number.parseInt(process.env.SOUNDCLOUD_CACHE_TTL_MS || `${12 * 60 * 60 * 1000}`, 10);
+const CACHE_STALE_MS = Number.parseInt(process.env.SOUNDCLOUD_CACHE_STALE_MS || `${30 * 60 * 1000}`, 10);
+const RATE_LIMIT_BACKOFF_MS = Number.parseInt(process.env.SOUNDCLOUD_RATE_LIMIT_BACKOFF_MS || '60000', 10);
+const RETRY_ATTEMPTS = Number.parseInt(process.env.SOUNDCLOUD_RETRY_ATTEMPTS || '2', 10);
+const MAX_CACHE_SIZE = 1000;
 
 const normalizeToken = (value) => (value ?? '').toString().toLowerCase().trim();
 
@@ -20,20 +25,100 @@ const dedupe = (items) => {
   return out;
 };
 
-const withCache = async (key, fn) => {
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const parseRetryAfterMs = (value) => {
+  if (!value) return null;
+  if (/^\d+$/.test(String(value).trim())) {
+    return Math.max(Number.parseInt(value, 10) * 1000, 0);
   }
-  const value = await fn();
-  cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
-  if (cache.size > 1000) {
-    const now = Date.now();
-    for (const [entryKey, entry] of cache.entries()) {
-      if (entry.expiresAt <= now) cache.delete(entryKey);
+  const dateMs = Date.parse(value);
+  if (Number.isNaN(dateMs)) return null;
+  return Math.max(dateMs - Date.now(), 0);
+};
+
+const isRetryableError = (err) => {
+  const status = Number(err?.response?.status || 0);
+  if (status === 429 || status >= 500) return true;
+  return ['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN'].includes(err?.code);
+};
+
+const requestWithRetry = async (fn, label) => {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isRetryableError(err) || attempt >= RETRY_ATTEMPTS) {
+        throw err;
+      }
+      const retryAfter = parseRetryAfterMs(err?.response?.headers?.['retry-after']);
+      const backoff = retryAfter ?? Math.min(RATE_LIMIT_BACKOFF_MS * (attempt + 1), 120000);
+      const jitter = Math.floor(Math.random() * 250);
+      const waitMs = backoff + jitter;
+      console.warn(`[soundcloud-client] retrying ${label} in ${waitMs}ms (attempt ${attempt + 1}/${RETRY_ATTEMPTS})`);
+      await sleep(waitMs);
+      attempt += 1;
     }
   }
-  return value;
+};
+
+const cleanupCache = () => {
+  if (cache.size <= MAX_CACHE_SIZE) return;
+  const now = Date.now();
+  for (const [entryKey, entry] of cache.entries()) {
+    if ((entry?.staleUntil || 0) <= now) {
+      cache.delete(entryKey);
+    }
+  }
+};
+
+const withCache = async (key, fn) => {
+  const now = Date.now();
+  const cached = cache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  if (inFlight.has(key)) {
+    return inFlight.get(key);
+  }
+
+  const task = fn()
+    .then((value) => {
+      const createdAt = Date.now();
+      cache.set(key, {
+        value,
+        expiresAt: createdAt + CACHE_TTL_MS,
+        staleUntil: createdAt + CACHE_TTL_MS + CACHE_STALE_MS
+      });
+      cleanupCache();
+      return value;
+    })
+    .catch((err) => {
+      const stale = cache.get(key);
+      if (stale && stale.staleUntil > Date.now()) {
+        console.warn(`[soundcloud-client] serving stale cache for ${key} due to upstream error`);
+        return stale.value;
+      }
+
+      // Back off aggressively on hard rate-limits to avoid hammering the API.
+      if (Number(err?.response?.status) === 429) {
+        const holdUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
+        cache.set(key, {
+          value: [],
+          expiresAt: holdUntil,
+          staleUntil: holdUntil
+        });
+      }
+      throw err;
+    })
+    .finally(() => {
+      inFlight.delete(key);
+    });
+
+  inFlight.set(key, task);
+  return task;
 };
 
 const toBestAvatar = (avatarUrl) => {
@@ -74,14 +159,17 @@ const searchUsers = async (clientId, query, limit = 20) => {
   const cacheKey = `soundcloud:users:${normalizeToken(searchQuery)}:${safeLimit}`;
 
   return withCache(cacheKey, async () => {
-    const response = await http.get(`${SOUNDCLOUD_API}/search/users`, {
-      params: {
-        q: searchQuery,
-        client_id: clientId,
-        limit: safeLimit,
-        linked_partitioning: 1
-      }
-    });
+    const response = await requestWithRetry(
+      () => http.get(`${SOUNDCLOUD_API}/search/users`, {
+        params: {
+          q: searchQuery,
+          client_id: clientId,
+          limit: safeLimit,
+          linked_partitioning: 1
+        }
+      }),
+      `search-users:${normalizeToken(searchQuery)}`
+    );
 
     const collection = Array.isArray(response.data?.collection) ? response.data.collection : [];
 
