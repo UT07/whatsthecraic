@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import eventsAPI from '../services/eventsAPI';
@@ -7,7 +7,8 @@ import venueAPI from '../services/venueAPI';
 import authAPI from '../services/authAPI';
 import mlAPI from '../services/mlAPI';
 import { getToken } from '../services/apiClient';
-import { getBestImage, fetchArtistImage } from '../utils/imageUtils';
+import { fetchArtistImage, resolveEventImage } from '../utils/imageUtils';
+import { groupEventsForDisplay, normalizeRecommendationEvent } from '../utils/eventGrouping';
 import { ExplainabilityModal, TasteProfilePanel, FeedbackButtons, EventDensityHeatMap } from '../components/ml';
 import MixcloudPlayer from '../components/MixcloudPlayer';
 
@@ -75,8 +76,45 @@ const MatchBadge = ({ reasons, score }) => {
   );
 };
 
+const EventSessionsPreview = ({ event, compact = false }) => {
+  const sessions = Array.isArray(event?.sessions) ? event.sessions : [];
+  if (sessions.length <= 1) return null;
+
+  const visible = sessions.slice(0, compact ? 2 : 3);
+  const remaining = sessions.length - visible.length;
+
+  return (
+    <div style={{
+      display: 'grid',
+      gap: '0.35rem',
+      marginTop: '0.45rem'
+    }}>
+      {visible.map((session) => (
+        <div
+          key={`${session.id || 'slot'}-${session.start_time || ''}`}
+          style={{
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 8,
+            padding: compact ? '0.2rem 0.4rem' : '0.28rem 0.45rem',
+            background: 'rgba(255,255,255,0.02)',
+            fontSize: compact ? '0.68rem' : '0.72rem',
+            color: 'var(--muted)'
+          }}
+        >
+          {formatDate(session.start_time)} {formatTime(session.start_time) && `· ${formatTime(session.start_time)}`}
+        </div>
+      ))}
+      {remaining > 0 && (
+        <span style={{ fontSize: '0.68rem', color: 'var(--emerald)', fontWeight: 600 }}>
+          +{remaining} more dates
+        </span>
+      )}
+    </div>
+  );
+};
+
 const EventCard = ({ event, index, saved, onSave, onExplain, onCardClick, showFeedback = false }) => {
-  const image = getBestImage(event.images, 'card', 400);
+  const image = resolveEventImage(event, 'card', 400);
 
   const handleCardClick = () => {
     if (onCardClick) {
@@ -140,6 +178,10 @@ const EventCard = ({ event, index, saved, onSave, onExplain, onCardClick, showFe
               <span key={g} className="chip" style={{ fontSize: '0.68rem', padding: '0.2rem 0.5rem' }}>{g}</span>
             ))}
           </div>
+        </div>
+        <EventSessionsPreview event={event} />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.6rem' }}>
+          <div />
           <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
             {showFeedback && (
               <FeedbackButtons
@@ -166,55 +208,9 @@ const EventCard = ({ event, index, saved, onSave, onExplain, onCardClick, showFe
   );
 };
 
-const HeroBanner = ({ event }) => {
-  if (!event) return null;
-  const image = getBestImage(event.images, 'hero', 1200);
-  return (
-    <Link to="/discover" className="hero-banner" style={{ minHeight: 380 }}>
-      {image ? (
-        <img src={image} alt={event.title} className="hero-banner-img" />
-      ) : (
-        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, #1a1a1a, #0a0a0a)' }} />
-      )}
-      <div className="hero-banner-overlay" />
-      <div className="hero-banner-content">
-        <span className="badge" style={{ marginBottom: '0.6rem' }}>Featured</span>
-        <h2 style={{ fontSize: 'clamp(1.4rem, 3vw, 2.2rem)', fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1.15, marginBottom: '0.5rem' }}>
-          {event.title}
-        </h2>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', color: 'var(--muted)', fontSize: '0.9rem' }}>
-          <span>{event.venue_name || 'Venue TBA'}</span>
-          <span style={{ color: 'var(--emerald)' }}>{formatDate(event.start_time)} {formatTime(event.start_time) && `\u00B7 ${formatTime(event.start_time)}`}</span>
-        </div>
-      </div>
-    </Link>
-  );
-};
-
-const SmallHeroCard = ({ event }) => {
-  if (!event) return null;
-  const image = getBestImage(event.images, 'card', 600);
-  return (
-    <Link to="/discover" className="hero-banner" style={{ minHeight: 180 }}>
-      {image ? (
-        <img src={image} alt={event.title} className="hero-banner-img" />
-      ) : (
-        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, #1e1e1e, #111)' }} />
-      )}
-      <div className="hero-banner-overlay" />
-      <div className="hero-banner-content" style={{ padding: '1rem' }}>
-        <h3 style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.25, marginBottom: '0.25rem' }} className="line-clamp-2">
-          {event.title}
-        </h3>
-        <span style={{ fontSize: '0.75rem', color: 'var(--emerald)' }}>{formatDate(event.start_time)}</span>
-      </div>
-    </Link>
-  );
-};
-
 /* Enhanced Upcoming Event Card with image loading */
 const UpcomingEventCard = ({ event, index }) => {
-  const [image, setImage] = useState(getBestImage(event.images, 'thumb', 200));
+  const [image, setImage] = useState(resolveEventImage(event, 'thumb', 200));
   const [loadingImage, setLoadingImage] = useState(false);
 
   useEffect(() => {
@@ -445,36 +441,62 @@ const Dashboard = () => {
       .catch(() => {});
   };
 
+  const groupedEvents = useMemo(() => groupEventsForDisplay(events), [events]);
+  const groupedFeedEvents = useMemo(() => groupEventsForDisplay(feedEvents), [feedEvents]);
+
+  const eventFallbackById = useMemo(() => {
+    const map = new Map();
+    [...events, ...feedEvents].forEach((event) => {
+      const candidateIds = [
+        event?.id,
+        event?.event_id,
+        event?.external_id,
+        event?.source_id,
+        event?.ticketmaster_id
+      ].filter((value) => value !== null && value !== undefined && value !== '');
+
+      candidateIds.forEach((value) => {
+        map.set(String(value), event);
+      });
+    });
+    return map;
+  }, [events, feedEvents]);
+
+  const groupedMlRecommendations = useMemo(() => {
+    const normalized = (mlRecommendations || [])
+      .map((event) => normalizeRecommendationEvent(event, eventFallbackById));
+    return groupEventsForDisplay(normalized);
+  }, [mlRecommendations, eventFallbackById]);
+
   // Prioritize events with images
-  const eventsWithImages = events.filter(e => e.images?.length > 0);
-  const heroEvents = eventsWithImages.length >= 3 ? eventsWithImages : events;
+  const eventsWithImages = groupedEvents.filter((event) => Boolean(resolveEventImage(event, 'card', 400)));
 
   // Filter events by genre
   const filteredEvents = activeGenre === 'All'
-    ? events
-    : events.filter(e => (e.genres || []).some(g => g.toLowerCase().includes(activeGenre.toLowerCase())));
+    ? groupedEvents
+    : groupedEvents.filter((event) => (event.genres || []).some((genre) => genre.toLowerCase().includes(activeGenre.toLowerCase())));
 
   // Personalized or trending - prefer feed events which have ML ranking
-  const personalizedEvents = feedEvents.length > 0 ? feedEvents : events;
+  const personalizedEvents = groupedFeedEvents.length > 0 ? groupedFeedEvents : groupedEvents;
 
   // Upcoming events sorted
-  const upcoming = [...events]
+  const upcoming = [...groupedEvents]
     .filter(e => new Date(e.start_time) > new Date())
     .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
 
   // Premium ML sections
   // 1. Highest-scored event for hero
-  const topScoredEvent = feedEvents.length > 0
-    ? feedEvents.reduce((best, curr) => (curr.rank_score || 0) > (best.rank_score || 0) ? curr : best, feedEvents[0])
-    : eventsWithImages[0] || events[0];
+  const topScoredEvent = groupedFeedEvents.length > 0
+    ? groupedFeedEvents.reduce((best, curr) => (curr.rank_score || 0) > (best.rank_score || 0) ? curr : best, groupedFeedEvents[0])
+    : eventsWithImages[0] || groupedEvents[0];
+  const topScoredImage = topScoredEvent ? resolveEventImage(topScoredEvent, 'hero', 1400) : null;
 
   // 2. This Weekend events (Friday-Sunday)
   const now = new Date();
-  const thisWeekend = [...events]
+  const thisWeekend = [...groupedEvents]
     .filter(e => {
       const eventDate = new Date(e.start_time);
       if (eventDate < now) return false;
-      const dayOfWeek = eventDate.getDay();
       const daysUntilFriday = (5 - now.getDay() + 7) % 7;
       const thisFriday = new Date(now);
       thisFriday.setDate(now.getDate() + daysUntilFriday);
@@ -488,19 +510,19 @@ const Dashboard = () => {
     .slice(0, 10);
 
   // 3. Trending Near You (by save count or ML popularity score)
-  const trending = [...events]
+  const trending = [...groupedEvents]
     .filter(e => e.save_count || e.rank_score)
     .sort((a, b) => (b.save_count || 0) - (a.save_count || 0) || (b.rank_score || 0) - (a.rank_score || 0))
     .slice(0, 12);
 
   // 4. By Genre grouping
   const topUserGenres = spotifyProfile?.top_genres?.slice(0, 3) || [];
-  const eventsByGenre = topUserGenres.map(genreObj => {
+  const eventsByGenre = topUserGenres.map((genreObj) => {
     const genreName = typeof genreObj === 'object' ? genreObj.genre : genreObj;
     return {
       genre: genreName,
-      events: events
-        .filter(e => (e.genres || []).some(g => g.toLowerCase().includes(genreName.toLowerCase())))
+      events: groupedEvents
+        .filter((event) => (event.genres || []).some((genre) => genre.toLowerCase().includes(genreName.toLowerCase())))
         .slice(0, 6)
     };
   }).filter(g => g.events.length > 0);
@@ -528,9 +550,9 @@ const Dashboard = () => {
           transition={{ duration: 0.5 }}
           style={{ position: 'relative', borderRadius: 20, overflow: 'hidden', minHeight: 500 }}
         >
-          {getBestImage(topScoredEvent.images, 'hero', 1400) ? (
+          {topScoredImage ? (
             <img
-              src={getBestImage(topScoredEvent.images, 'hero', 1400)}
+              src={topScoredImage}
               alt={topScoredEvent.title}
               style={{
                 position: 'absolute',
@@ -751,7 +773,7 @@ const Dashboard = () => {
           </div>
           <div className="scroll-row" style={{ gap: '1rem' }}>
             {thisWeekend.map((event, i) => {
-              const img = getBestImage(event.images, 'card', 500);
+              const img = resolveEventImage(event, 'card', 500);
               return (
                 <motion.div
                   key={event.id || i}
@@ -797,6 +819,7 @@ const Dashboard = () => {
                         <span key={g} className="chip" style={{ fontSize: '0.68rem', padding: '0.2rem 0.5rem' }}>{g}</span>
                       ))}
                     </div>
+                    <EventSessionsPreview event={event} compact />
                   </div>
                 </motion.div>
               );
@@ -862,7 +885,7 @@ const Dashboard = () => {
           </div>
           <div className="scroll-row">
             {genreGroup.events.map((event, i) => {
-              const img = getBestImage(event.images, 'card', 400);
+              const img = resolveEventImage(event, 'card', 400);
               return (
                 <motion.div
                   key={event.id || i}
@@ -892,6 +915,7 @@ const Dashboard = () => {
                       <div className="venue-strip-dot" />
                       <span className="venue-strip-name">{event.venue_name || 'TBA'}</span>
                     </div>
+                    <EventSessionsPreview event={event} compact />
                     <span style={{ fontSize: '0.72rem', color: 'var(--emerald)', fontWeight: 600, display: 'block', marginTop: '0.3rem' }}>
                       {formatDate(event.start_time)}
                     </span>
@@ -904,7 +928,7 @@ const Dashboard = () => {
       ))}
 
       {/* ─── FANS LIKE YOU ALSO SAVED (ML Collaborative Filtering) ─── */}
-      {token && mlRecommendations.length > 0 && (
+      {token && groupedMlRecommendations.length > 0 && (
         <section>
           <div className="section-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -917,8 +941,8 @@ const Dashboard = () => {
             <Link to="/discover" className="section-header-link">See all &rarr;</Link>
           </div>
           <div className="scroll-row">
-            {mlRecommendations.map((event, i) => {
-              const img = getBestImage(event.images, 'card', 400);
+            {groupedMlRecommendations.map((event, i) => {
+              const img = resolveEventImage(event, 'card', 400);
               return (
                 <div key={event.id || i} className="card-event" style={{ width: 220, flexShrink: 0 }}>
                   <div className="card-event-img-wrap" style={{ paddingTop: '100%', cursor: 'pointer' }} onClick={() => handleCardClick(event)}>
@@ -973,6 +997,7 @@ const Dashboard = () => {
                       <div className="venue-strip-dot" />
                       <span className="venue-strip-name">{event.venue_name || 'TBA'}</span>
                     </div>
+                    <EventSessionsPreview event={event} compact />
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem' }}>
                       <span style={{ fontSize: '0.72rem', color: 'var(--emerald)', fontWeight: 600 }}>
                         {formatDate(event.start_time)}
@@ -997,7 +1022,7 @@ const Dashboard = () => {
           <div className="section-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
               <h2 className="section-header-title">For you</h2>
-              {feedEvents.length > 0 && (
+              {groupedFeedEvents.length > 0 && (
                 <span className="badge" style={{ fontSize: '0.6rem' }}>
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
                   AI Picks
@@ -1008,7 +1033,7 @@ const Dashboard = () => {
           </div>
           <div className="scroll-row">
             {personalizedEvents.slice(0, 12).map((event, i) => {
-              const img = getBestImage(event.images, 'card', 400);
+              const img = resolveEventImage(event, 'card', 400);
               return (
                 <div key={event.id || i} className="card-event" style={{ width: 220, flexShrink: 0 }}>
                   <div className="card-event-img-wrap" style={{ paddingTop: '100%' }}>
@@ -1046,6 +1071,7 @@ const Dashboard = () => {
                       <div className="venue-strip-dot" />
                       <span className="venue-strip-name">{event.venue_name || 'TBA'}</span>
                     </div>
+                    <EventSessionsPreview event={event} compact />
                     <span style={{ fontSize: '0.72rem', color: 'var(--emerald)', fontWeight: 600, display: 'block', marginTop: '0.3rem' }}>
                       {formatDate(event.start_time)}
                     </span>
@@ -1064,7 +1090,7 @@ const Dashboard = () => {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           </div>
           <div>
-            <div className="stat-pill-value text-emerald">{events.length}</div>
+            <div className="stat-pill-value text-emerald">{groupedEvents.length}</div>
             <div className="stat-pill-label">Events</div>
           </div>
         </div>
@@ -1086,13 +1112,13 @@ const Dashboard = () => {
             <div className="stat-pill-label">Venues</div>
           </div>
         </div>
-        {feedEvents.length > 0 && (
+        {groupedFeedEvents.length > 0 && (
           <div className="stat-pill animate-fade-up">
             <div className="stat-pill-icon" style={{ background: 'var(--violet-dim)', color: 'var(--violet)' }}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
             </div>
             <div>
-              <div className="stat-pill-value" style={{ color: 'var(--violet)' }}>{feedEvents.length}</div>
+              <div className="stat-pill-value" style={{ color: 'var(--violet)' }}>{groupedFeedEvents.length}</div>
               <div className="stat-pill-label">Matched for you</div>
             </div>
           </div>
@@ -1210,7 +1236,7 @@ const Dashboard = () => {
 
               useEffect(() => {
                 const loadImage = async () => {
-                  if (!loadingImage && dj.dj_name) {
+                  if (!loadingImage && !djImage && dj.dj_name) {
                     setLoadingImage(true);
                     const image = await fetchArtistImage(dj.dj_name);
                     if (image) setDjImage(image);
@@ -1218,7 +1244,7 @@ const Dashboard = () => {
                   }
                 };
                 loadImage();
-              }, []);
+              }, [djImage, loadingImage]);
 
               return (
                 <Link to="/djs" key={dj.dj_id} className="card-artist" style={{ width: 180, flexShrink: 0 }}>

@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import eventsAPI from '../services/eventsAPI';
 import { getToken } from '../services/apiClient';
-import { getBestImage, fetchArtistImage } from '../utils/imageUtils';
+import { fetchArtistImage, resolveEventImage } from '../utils/imageUtils';
+import { groupEventsForDisplay } from '../utils/eventGrouping';
 
 const formatDate = (iso) => {
   if (!iso) return 'TBA';
@@ -63,8 +64,41 @@ const MatchBadge = ({ reasons, score }) => {
   );
 };
 
+const EventSessionsPreview = ({ event }) => {
+  const sessions = Array.isArray(event?.sessions) ? event.sessions : [];
+  if (sessions.length <= 1) return null;
+
+  const visible = sessions.slice(0, 3);
+  const remaining = sessions.length - visible.length;
+
+  return (
+    <div style={{ display: 'grid', gap: '0.35rem', marginTop: '0.45rem' }}>
+      {visible.map((session) => (
+        <div
+          key={`${session.id || 'slot'}-${session.start_time || ''}`}
+          style={{
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 8,
+            padding: '0.25rem 0.4rem',
+            background: 'rgba(255,255,255,0.02)',
+            fontSize: '0.7rem',
+            color: 'var(--muted)'
+          }}
+        >
+          {formatDate(session.start_time)} {formatTime(session.start_time) && `· ${formatTime(session.start_time)}`}
+        </div>
+      ))}
+      {remaining > 0 && (
+        <span style={{ fontSize: '0.68rem', color: 'var(--emerald)', fontWeight: 600 }}>
+          +{remaining} more dates
+        </span>
+      )}
+    </div>
+  );
+};
+
 const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
-  const [image, setImage] = useState(getBestImage(event.images, 'card', 400));
+  const [image, setImage] = useState(resolveEventImage(event, 'card', 400));
   const [loadingImage, setLoadingImage] = useState(false);
 
   // Fetch artist image if event has no image
@@ -152,6 +186,7 @@ const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
             {event.city || 'Ireland'}
           </span>
         </div>
+        <EventSessionsPreview event={event} />
         <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
           {event.ticket_url && (
             <a href={event.ticket_url} target="_blank" rel="noreferrer"
@@ -203,32 +238,41 @@ const CombinedGigs = () => {
     Object.entries(filters).forEach(([k, v]) => { if (v) clean[k] = v; });
     return clean;
   }, [filters]);
+  const activeFiltersRef = useRef(activeFilters);
 
-  const loadFeed = async () => {
+  useEffect(() => {
+    activeFiltersRef.current = activeFilters;
+  }, [activeFilters]);
+
+  const groupedEvents = useMemo(() => groupEventsForDisplay(events), [events]);
+  const groupedSavedEvents = useMemo(() => groupEventsForDisplay(savedEvents), [savedEvents]);
+  const groupedHiddenEvents = useMemo(() => groupEventsForDisplay(hiddenEvents), [hiddenEvents]);
+  const mergedDuplicatesCount = Math.max(0, events.length - groupedEvents.length);
+
+  const loadFeed = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await eventsAPI.getFeed(activeFilters);
+      const data = await eventsAPI.getFeed(activeFiltersRef.current);
       setEvents(data.events || []);
       setResultInfo({ ranked: data.ranked || false, count: data.count || 0 });
     } catch { setEvents([]); }
     finally { setLoading(false); }
-  };
+  }, []);
 
-  const runSearch = async () => {
+  const runSearch = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await eventsAPI.searchEvents(activeFilters);
+      const data = await eventsAPI.searchEvents(activeFiltersRef.current);
       setEvents(data.events || []);
       setResultInfo({ ranked: data.ranked || false, count: data.count || 0 });
     } catch { setEvents([]); }
     finally { setLoading(false); }
-  };
+  }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (mode === 'feed') loadFeed();
     else if (mode === 'search') runSearch();
-  }, [mode]);
+  }, [mode, loadFeed, runSearch]);
 
   useEffect(() => {
     if (!token) return;
@@ -394,11 +438,16 @@ const CombinedGigs = () => {
         </AnimatePresence>
 
         {/* Results summary */}
-        {!loading && events.length > 0 && (
+        {!loading && groupedEvents.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
-              {resultInfo.count || events.length} events
+              {groupedEvents.length} events
             </span>
+            {mergedDuplicatesCount > 0 && (
+              <span style={{ fontSize: '0.72rem', color: 'var(--muted-2)' }}>
+                ({mergedDuplicatesCount} duplicates merged)
+              </span>
+            )}
             {resultInfo.ranked && (
               <span className="badge" style={{ fontSize: '0.6rem' }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
@@ -419,7 +468,7 @@ const CombinedGigs = () => {
         <div className="tabs" style={{ width: 'fit-content' }}>
           <button className={`tab ${activeTab === 'events' ? 'tab-active' : ''}`} onClick={() => setActiveTab('events')}>Events</button>
           <button className={`tab ${activeTab === 'saved' ? 'tab-active' : ''}`} onClick={() => setActiveTab('saved')}>
-            Saved {savedEvents.length > 0 && `(${savedEvents.length})`}
+            Saved {groupedSavedEvents.length > 0 && `(${groupedSavedEvents.length})`}
           </button>
           <button className={`tab ${activeTab === 'alerts' ? 'tab-active' : ''}`} onClick={() => setActiveTab('alerts')}>Alerts</button>
           <button className={`tab ${activeTab === 'hidden' ? 'tab-active' : ''}`} onClick={() => setActiveTab('hidden')}>Hidden</button>
@@ -487,7 +536,7 @@ const CombinedGigs = () => {
       {/* Saved Tab */}
       {token && activeTab === 'saved' && (
         <section className="animate-fade-in">
-          {savedEvents.length === 0 ? (
+          {groupedSavedEvents.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'var(--muted-2)', margin: '0 auto 1rem' }}>
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
@@ -497,8 +546,8 @@ const CombinedGigs = () => {
             </div>
           ) : (
             <div className="grid-events">
-              {savedEvents.map((event, i) => (
-                <EventCard key={event.id} event={event} index={i} saved={true} onSave={handleSave} token={token} />
+              {groupedSavedEvents.map((event, i) => (
+                <EventCard key={event.group_id || event.id} event={event} index={i} saved={true} onSave={handleSave} token={token} />
               ))}
             </div>
           )}
@@ -508,26 +557,29 @@ const CombinedGigs = () => {
       {/* Hidden Tab */}
       {token && activeTab === 'hidden' && (
         <section className="animate-fade-in">
-          {hiddenEvents.length === 0 ? (
+          {groupedHiddenEvents.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
               <p style={{ color: 'var(--muted)' }}>No hidden events.</p>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '0.5rem' }}>
-              {hiddenEvents.map(event => (
-                <div key={event.id} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    {event.images?.length > 0 && (
-                      <img src={getBestImage(event.images, 'thumb', 80)} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
-                    )}
-                    <div>
-                      <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>{event.title}</span>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--muted)', marginLeft: '0.75rem' }}>{formatDate(event.start_time)}</span>
+              {groupedHiddenEvents.map((event) => {
+                const thumb = resolveEventImage(event, 'thumb', 80);
+                return (
+                  <div key={event.group_id || event.id} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      {thumb && (
+                        <img src={thumb} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
+                      )}
+                      <div>
+                        <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>{event.title}</span>
+                        <span style={{ fontSize: '0.78rem', color: 'var(--muted)', marginLeft: '0.75rem' }}>{formatDate(event.start_time)}</span>
+                      </div>
                     </div>
+                    <button className="btn btn-outline btn-sm" onClick={() => handleUnhide(event.id)}>Restore</button>
                   </div>
-                  <button className="btn btn-outline btn-sm" onClick={() => handleUnhide(event.id)}>Restore</button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -548,7 +600,7 @@ const CombinedGigs = () => {
                   <div key={i} className="skeleton" style={{ height: 320, borderRadius: 14 }} />
                 ))}
               </motion.div>
-            ) : events.length === 0 ? (
+            ) : groupedEvents.length === 0 ? (
               <motion.div
                 key="empty"
                 initial={{ opacity: 0 }}
@@ -566,8 +618,8 @@ const CombinedGigs = () => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 className="grid-events">
-                {events.map((event, i) => (
-                  <EventCard key={`${event.id}-${i}`} event={event} index={i}
+                {groupedEvents.map((event, i) => (
+                  <EventCard key={event.group_id || `${event.id}-${i}`} event={event} index={i}
                     saved={savedIds.has(event.id)} onSave={handleSave} onHide={handleHide} token={token} />
                 ))}
               </motion.div>

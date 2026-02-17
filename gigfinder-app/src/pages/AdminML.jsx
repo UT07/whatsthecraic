@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import mlAPI from '../services/mlAPI';
 
 const AdminML = () => {
@@ -9,11 +9,7 @@ const AdminML = () => {
   const [retraining, setRetraining] = useState(false);
   const [toast, setToast] = useState(null);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
-
-  const loadDashboardData = async () => {
+  const loadDashboardData = useCallback(async () => {
     setLoading(true);
     try {
       const [model, expList] = await Promise.all([
@@ -44,12 +40,16 @@ const AdminML = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
 
   const handleRetrain = async () => {
     setRetraining(true);
     try {
-      const result = await mlAPI.triggerRetrain();
+      await mlAPI.triggerRetrain();
       showToast('Model retrained successfully!', 'success');
       // Refresh model info after retrain
       const updatedModel = await mlAPI.getModelInfo();

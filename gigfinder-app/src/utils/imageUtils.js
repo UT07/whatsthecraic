@@ -45,6 +45,42 @@ export const getBestImage = (images, context = 'card', targetWidth = 600) => {
 };
 
 /**
+ * Resolve image URL from a full event object. Falls back across common API shapes.
+ * @param {Object} event - Event-like object from search/feed/ml endpoints
+ * @param {'hero'|'card'|'thumb'} context
+ * @param {number} targetWidth
+ * @returns {string|null}
+ */
+export const resolveEventImage = (event, context = 'card', targetWidth = 600) => {
+  if (!event) return null;
+
+  // Preferred path: structured images array.
+  if (Array.isArray(event.images) && event.images.length > 0) {
+    const best = getBestImage(event.images, context, targetWidth);
+    if (best) return best;
+  }
+
+  // Some services return images as JSON string.
+  if (typeof event.images === 'string' && event.images.trim()) {
+    try {
+      const parsed = JSON.parse(event.images);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const best = getBestImage(parsed, context, targetWidth);
+        if (best) return best;
+      }
+    } catch {
+      // Ignore parse failures and keep fallback chain.
+    }
+  }
+
+  // Flat image fields used by some endpoints.
+  const flatImage = event.image_url || event.imageUrl || event.image || event.poster_url || null;
+  if (flatImage) return flatImage;
+
+  return null;
+};
+
+/**
  * Get a srcset string for responsive images
  */
 export const getImageSrcSet = (images) => {
