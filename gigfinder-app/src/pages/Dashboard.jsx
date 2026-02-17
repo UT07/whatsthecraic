@@ -66,9 +66,25 @@ const getTopGenresFromProfile = (profile, limit = 5) => uniqueTokens(
   limit
 );
 
-const buildTasteQuery = (profile) => {
-  const artists = getTopArtistsFromProfile(profile, 2);
-  const genres = getTopGenresFromProfile(profile, 4);
+const getTopArtistsFromSoundCloudProfile = (profile, limit = 3) => uniqueTokens(
+  (profile?.top_artists || []).map((item) => (typeof item === 'string' ? item : item?.name || item)),
+  limit
+);
+
+const getTopGenresFromSoundCloudProfile = (profile, limit = 5) => uniqueTokens(
+  (profile?.top_genres || []).map((item) => (typeof item === 'string' ? item : item?.genre || item)),
+  limit
+);
+
+const buildTasteQuery = (spotifyProfile, soundcloudProfile) => {
+  const artists = uniqueTokens([
+    ...getTopArtistsFromProfile(spotifyProfile, 2),
+    ...getTopArtistsFromSoundCloudProfile(soundcloudProfile, 2)
+  ], 3);
+  const genres = uniqueTokens([
+    ...getTopGenresFromProfile(spotifyProfile, 4),
+    ...getTopGenresFromSoundCloudProfile(soundcloudProfile, 4)
+  ], 5);
   const tokens = [...artists, ...genres];
   return tokens.length > 0 ? tokens.join(' ') : DEFAULT_TASTE_QUERY;
 };
@@ -88,15 +104,20 @@ const extractGenreTokens = (genres) => {
   return [];
 };
 
-const buildMlContextFromTaste = (profile, soundcloudPerformers = []) => {
-  const spotifyArtists = getTopArtistsFromProfile(profile, 8);
-  const spotifyGenres = getTopGenresFromProfile(profile, 8);
+const buildMlContextFromTaste = (spotifyProfile, soundcloudProfile, soundcloudPerformers = []) => {
+  const spotifyArtists = getTopArtistsFromProfile(spotifyProfile, 8);
+  const spotifyGenres = getTopGenresFromProfile(spotifyProfile, 8);
+  const connectedSoundcloudArtists = getTopArtistsFromSoundCloudProfile(soundcloudProfile, 8);
+  const connectedSoundcloudGenres = getTopGenresFromSoundCloudProfile(soundcloudProfile, 8);
   const soundcloudArtists = uniqueTokens(
-    (soundcloudPerformers || []).map((performer) => performer?.name),
+    [...connectedSoundcloudArtists, ...(soundcloudPerformers || []).map((performer) => performer?.name)],
     8
   );
   const soundcloudGenres = uniqueTokens(
-    (soundcloudPerformers || []).flatMap((performer) => extractGenreTokens(performer?.genres)),
+    [
+      ...connectedSoundcloudGenres,
+      ...(soundcloudPerformers || []).flatMap((performer) => extractGenreTokens(performer?.genres))
+    ],
     10
   );
 
@@ -416,6 +437,8 @@ const Dashboard = () => {
   const [mixcloudArtists, setMixcloudArtists] = useState([]);
   const [spotifyStatus, setSpotifyStatus] = useState(null);
   const [spotifyProfile, setSpotifyProfile] = useState(null);
+  const [soundcloudStatus, setSoundcloudStatus] = useState(null);
+  const [soundcloudProfile, setSoundcloudProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeGenre, setActiveGenre] = useState('All');
   const [savedIds, setSavedIds] = useState(new Set());
@@ -453,13 +476,45 @@ const Dashboard = () => {
   }, [token]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setSpotifyStatus(null);
+      setSpotifyProfile(null);
+      setSoundcloudStatus(null);
+      setSoundcloudProfile(null);
+      return;
+    }
+
     authAPI.getSpotifyStatus()
-      .then(setSpotifyStatus)
-      .catch(() => setSpotifyStatus(null));
-    authAPI.getSpotifyProfile()
-      .then(setSpotifyProfile)
-      .catch(() => setSpotifyProfile(null));
+      .then((status) => {
+        setSpotifyStatus(status);
+        if (!status?.linked) {
+          setSpotifyProfile(null);
+          return;
+        }
+        authAPI.getSpotifyProfile()
+          .then(setSpotifyProfile)
+          .catch(() => setSpotifyProfile(null));
+      })
+      .catch(() => {
+        setSpotifyStatus(null);
+        setSpotifyProfile(null);
+      });
+
+    authAPI.getSoundCloudStatus()
+      .then((status) => {
+        setSoundcloudStatus(status);
+        if (!status?.linked) {
+          setSoundcloudProfile(null);
+          return;
+        }
+        authAPI.getSoundCloudProfile()
+          .then(setSoundcloudProfile)
+          .catch(() => setSoundcloudProfile(null));
+      })
+      .catch(() => {
+        setSoundcloudStatus(null);
+        setSoundcloudProfile(null);
+      });
   }, [token]);
 
   useEffect(() => {
@@ -476,7 +531,7 @@ const Dashboard = () => {
     };
 
     const loadTasteDrivenData = async () => {
-      const tasteQuery = buildTasteQuery(spotifyProfile);
+      const tasteQuery = buildTasteQuery(spotifyProfile, soundcloudProfile);
 
       try {
         let mixcloudPerformers = [];
@@ -517,7 +572,7 @@ const Dashboard = () => {
           limit: 30
         });
         const soundcloudPerformers = Array.isArray(soundcloudData?.performers) ? soundcloudData.performers : [];
-        const context = buildMlContextFromTaste(spotifyProfile, soundcloudPerformers);
+        const context = buildMlContextFromTaste(spotifyProfile, soundcloudProfile, soundcloudPerformers);
         const recommendationData = await mlAPI.getRecommendations({
           limit: 12,
           context
@@ -538,7 +593,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [token, spotifyProfile]);
+  }, [token, spotifyProfile, soundcloudProfile]);
 
   const handleSave = async (id) => {
     try {
@@ -574,6 +629,42 @@ const Dashboard = () => {
         authAPI.getSpotifyProfile().then(setSpotifyProfile).catch(() => {});
       })
       .catch(() => {});
+  };
+
+  const refreshSoundCloud = () => {
+    authAPI.getSoundCloudStatus().then(setSoundcloudStatus).catch(() => setSoundcloudStatus(null));
+    authAPI.getSoundCloudProfile().then(setSoundcloudProfile).catch(() => setSoundcloudProfile(null));
+  };
+
+  const handleConnectSoundCloud = async () => {
+    const profile = window.prompt('Enter your SoundCloud profile URL or username');
+    if (!profile || !profile.trim()) return;
+    try {
+      await authAPI.connectSoundCloud({ profile: profile.trim() });
+      refreshSoundCloud();
+    } catch (error) {
+      console.error('SoundCloud connect failed:', error);
+      window.alert('Could not connect SoundCloud. Please check the profile URL/username and try again.');
+    }
+  };
+
+  const handleSyncSoundCloud = async () => {
+    try {
+      await authAPI.syncSoundCloud();
+      refreshSoundCloud();
+    } catch (error) {
+      console.error('SoundCloud sync failed:', error);
+    }
+  };
+
+  const handleDisconnectSoundCloud = async () => {
+    try {
+      await authAPI.disconnectSoundCloud();
+      setSoundcloudStatus({ linked: false });
+      setSoundcloudProfile(null);
+    } catch (error) {
+      console.error('SoundCloud disconnect failed:', error);
+    }
   };
 
   const groupedEvents = useMemo(() => groupEventsForDisplay(events), [events]);
@@ -852,8 +943,58 @@ const Dashboard = () => {
         <SpotifyProfileWidget profile={spotifyProfile} status={spotifyStatus} onSync={handleSyncSpotify} />
       )}
 
+      {/* ─── SOUNDCLOUD CTA (not linked) ─── */}
+      {token && !soundcloudStatus?.linked && (
+        <motion.section
+          className="spotify-cta animate-fade-up"
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+          style={{ borderColor: 'rgba(255,140,66,0.35)', background: 'linear-gradient(135deg, rgba(255,140,66,0.15), rgba(0,0,0,0))' }}
+        >
+          <div className="spotify-cta-icon" style={{ background: 'rgba(255,140,66,0.25)', color: '#ff8c42' }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.2 2 11.36c0 4.66 3.63 8.53 8.39 9.16v-6.45H7.9V11.4h2.49V9.35c0-2.33 1.47-3.61 3.48-3.61.99 0 1.84.07 2.09.1v2.43h-1.43c-1.12 0-1.34.51-1.34 1.26v1.88h2.68l-.35 2.66h-2.33V20.5c4.84-.55 8.61-4.45 8.61-9.14C22 6.2 17.52 2 12 2z" />
+            </svg>
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.2rem' }}>Add SoundCloud taste</h3>
+            <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>Connect your SoundCloud profile (username or URL) to improve picks and artist matching.</p>
+          </div>
+          <button className="btn" onClick={handleConnectSoundCloud}>Connect SoundCloud</button>
+        </motion.section>
+      )}
+
+      {/* ─── SOUNDCLOUD PROFILE (linked) ─── */}
+      {token && soundcloudStatus?.linked && (
+        <motion.section
+          className="card"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{
+            padding: '1rem 1.25rem',
+            borderColor: 'rgba(255,140,66,0.28)',
+            background: 'linear-gradient(135deg, rgba(255,140,66,0.08), rgba(0,0,0,0))'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.9rem' }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>
+                SoundCloud connected
+                {soundcloudStatus?.username && <span style={{ color: 'var(--muted)', marginLeft: 8, fontWeight: 500 }}>@{soundcloudStatus.username}</span>}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+                {soundcloudStatus?.last_synced_at ? `Synced ${new Date(soundcloudStatus.last_synced_at).toLocaleDateString('en-IE')}` : 'Sync to refresh your SoundCloud taste profile'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <button className="btn btn-sm btn-ghost" onClick={handleSyncSoundCloud}>Sync</button>
+              <button className="btn btn-sm btn-ghost" onClick={handleDisconnectSoundCloud}>Disconnect</button>
+            </div>
+          </div>
+        </motion.section>
+      )}
+
       {/* ─── TASTE PROFILE PANEL ─── */}
-      {token && spotifyStatus?.linked && (
+      {token && (spotifyStatus?.linked || soundcloudStatus?.linked) && (
         <TasteProfilePanel />
       )}
 
@@ -878,7 +1019,7 @@ const Dashboard = () => {
                   <h3 style={{ fontWeight: 700, fontSize: '0.92rem' }} className="line-clamp-1">{artist.name}</h3>
                   <span className="chip" style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>mixcloud</span>
                 </div>
-                <MixcloudPlayer mixcloudUrl={artist.mixcloudUrl} artistName={artist.name} height={90} />
+                <MixcloudPlayer mixcloudUrl={artist.latestMixcloudUrl || artist.mixcloudUrl} artistName={artist.name} height={90} />
               </motion.div>
             ))}
           </div>

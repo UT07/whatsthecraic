@@ -240,9 +240,21 @@ if (process.env.TRUST_PROXY === 'true') {
   app.set('trust proxy', 1);
 }
 
+const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex').slice(0, 24);
+const resolveIpKey = (ip) => (typeof rateLimit.ipKeyGenerator === 'function' ? rateLimit.ipKeyGenerator(ip) : (ip || 'unknown'));
+const rateLimitKey = (req) => {
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    return `token:${hashToken(authHeader.slice(7))}`;
+  }
+  return `ip:${resolveIpKey(req.ip || req.socket?.remoteAddress)}`;
+};
+
 const rateLimiter = rateLimit({
   windowMs: parseIntOrDefault(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
-  max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 120),
+  max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 240),
+  keyGenerator: rateLimitKey,
+  skip: (req) => req.path === '/health' || req.path === '/metrics',
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -1875,8 +1887,10 @@ app.get('/v1/performers', async (req, res) => {
 
       for (const dj of djs) {
         let genres = null;
+        let latestCloudcastUrl = null;
         try {
           const casts = await mixcloudClient.getDJCloudcasts(dj.username, 5);
+          latestCloudcastUrl = casts[0]?.url || null;
           const allTags = casts.flatMap(c => c.tags);
           const unique = [...new Set(allTags)].slice(0, 5);
           if (unique.length) genres = unique.join(', ');
@@ -1886,7 +1900,9 @@ app.get('/v1/performers', async (req, res) => {
           source: 'mixcloud',
           image: dj.image,
           genres,
-          mixcloudUrl: dj.url,
+          mixcloudUrl: latestCloudcastUrl || dj.url,
+          mixcloudProfileUrl: dj.url,
+          latestMixcloudUrl: latestCloudcastUrl,
           username: dj.username
         });
       }

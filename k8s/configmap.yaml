@@ -46,17 +46,19 @@ data:
 
   # Mixcloud
   MIXCLOUD_ENABLED: "true"
+  MIXCLOUD_CACHE_TTL_MS: "900000"
 
   # SoundCloud
   SOUNDCLOUD_ENABLED: "true"
   SOUNDCLOUD_SIGNAL_TTL_MS: "21600000"
+  SOUNDCLOUD_GENRE_TAG_LIMIT: "20"
 
   # Spotify (rate limiting is now handled by in-memory cache in spotify-client.js)
   # No external Redis required - uses built-in caching with 24h TTL
 
   # Rate limiting
   RATE_LIMIT_WINDOW_MS: "60000"
-  RATE_LIMIT_MAX: "60"
+  RATE_LIMIT_MAX: "240"
   TRUST_PROXY: "true"
 
   # ML / Monitoring

@@ -1,5 +1,56 @@
 import React, { useState, useEffect } from 'react';
 
+const embedCache = new Map();
+
+const normalizeFeedValue = (url) => {
+  if (!url) return null;
+  const raw = url.toString().trim();
+  if (!raw) return null;
+
+  // Keep relative feed paths as-is (e.g. /user/show/)
+  if (raw.startsWith('/')) {
+    return raw.endsWith('/') ? raw : `${raw}/`;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (!parsed.hostname.includes('mixcloud.com')) return raw;
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length === 0) return null;
+    return `/${parts.join('/')}/`;
+  } catch {
+    return raw;
+  }
+};
+
+const isProfileFeed = (feedValue) => {
+  const normalized = normalizeFeedValue(feedValue);
+  if (!normalized) return false;
+  const parts = normalized.split('/').filter(Boolean);
+  return parts.length <= 1;
+};
+
+const resolveLatestCloudcastUrl = async (artistName) => {
+  if (!artistName) return null;
+
+  const searchResponse = await fetch(
+    `https://api.mixcloud.com/search/?q=${encodeURIComponent(artistName)}&type=user&limit=1`
+  );
+  if (!searchResponse.ok) return null;
+
+  const searchData = await searchResponse.json();
+  const user = searchData?.data?.[0];
+  if (!user?.key) return null;
+
+  const cloudcastsResponse = await fetch(
+    `https://api.mixcloud.com${user.key}cloudcasts/?limit=1`
+  );
+  if (!cloudcastsResponse.ok) return null;
+
+  const cloudcastsData = await cloudcastsResponse.json();
+  return cloudcastsData?.data?.[0]?.url || null;
+};
+
 /**
  * MixcloudPlayer - Embeds Mixcloud player using oEmbed API
  * @param {string} mixcloudUrl - Direct Mixcloud URL (e.g., https://www.mixcloud.com/artist/show-name/)
@@ -19,34 +70,21 @@ const MixcloudPlayer = ({ mixcloudUrl, artistName, autoplay = false, width = '10
       setError(null);
 
       try {
+        const cacheKey = `${mixcloudUrl || ''}|${artistName || ''}|${autoplay ? '1' : '0'}`;
+        const cached = embedCache.get(cacheKey);
+        if (cached) {
+          setIframeSrc(cached);
+          setLoading(false);
+          return;
+        }
+
         let url = mixcloudUrl;
 
-        // If no URL provided but artistName is, try to find recent mixes
-        if (!url && artistName) {
-          // Search for user/artist on Mixcloud
-          const searchResponse = await fetch(
-            `https://api.mixcloud.com/search/?q=${encodeURIComponent(artistName)}&type=user&limit=1`
-          );
-
-          if (searchResponse.ok) {
-            const searchData = await searchResponse.json();
-            const user = searchData.data?.[0];
-
-            if (user?.key) {
-              // Get cloudcasts (mixes) for this user
-              const cloudcastsResponse = await fetch(
-                `https://api.mixcloud.com${user.key}cloudcasts/?limit=1`
-              );
-
-              if (cloudcastsResponse.ok) {
-                const cloudcastsData = await cloudcastsResponse.json();
-                const latestMix = cloudcastsData.data?.[0];
-
-                if (latestMix?.url) {
-                  url = latestMix.url;
-                }
-              }
-            }
+        // If URL is absent or points to profile only, resolve to latest cloudcast.
+        if ((!url || isProfileFeed(url)) && artistName) {
+          const latest = await resolveLatestCloudcastUrl(artistName).catch(() => null);
+          if (latest) {
+            url = latest;
           }
         }
 
@@ -59,7 +97,7 @@ const MixcloudPlayer = ({ mixcloudUrl, artistName, autoplay = false, width = '10
         // Build Mixcloud widget URL directly (safer than parsing HTML)
         // Format: https://www.mixcloud.com/widget/iframe/?feed=<encoded_url>
         const widgetUrl = new URL('https://www.mixcloud.com/widget/iframe/');
-        widgetUrl.searchParams.set('feed', url);
+        widgetUrl.searchParams.set('feed', normalizeFeedValue(url) || url);
         widgetUrl.searchParams.set('hide_cover', '1');
         widgetUrl.searchParams.set('light', '1');
 
@@ -67,7 +105,9 @@ const MixcloudPlayer = ({ mixcloudUrl, artistName, autoplay = false, width = '10
           widgetUrl.searchParams.set('autoplay', '1');
         }
 
-        setIframeSrc(widgetUrl.toString());
+        const resolvedIframe = widgetUrl.toString();
+        embedCache.set(cacheKey, resolvedIframe);
+        setIframeSrc(resolvedIframe);
       } catch (err) {
         console.error('Mixcloud embed error:', err);
         setError(err.message || 'Failed to load Mixcloud player');

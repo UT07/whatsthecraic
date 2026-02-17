@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Radar } from 'react-chartjs-2';
+import { Radar, Bar, Doughnut } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   RadialLinearScale,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
   PointElement,
   LineElement,
   Filler,
@@ -16,6 +20,10 @@ import eventsAPI from '../../services/eventsAPI';
 // Register Chart.js components
 ChartJS.register(
   RadialLinearScale,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
   PointElement,
   LineElement,
   Filler,
@@ -23,12 +31,35 @@ ChartJS.register(
   Legend
 );
 
-/**
- * TasteProfilePanel - Displays user's musical taste profile
- * Shows a radar chart of genre affinities based on Spotify data and saved events
- */
+const normalizeToken = (value) => (value || '').toString().toLowerCase().trim();
+
+const toGenreCountMap = (items) => {
+  const map = new Map();
+  (Array.isArray(items) ? items : []).forEach((item, index) => {
+    const genre = normalizeToken(typeof item === 'string' ? item : item?.genre || item?.name || '');
+    if (!genre) return;
+    const count = Number(typeof item === 'object' ? item?.count : null) || Math.max((items.length - index), 1);
+    map.set(genre, (map.get(genre) || 0) + count);
+  });
+  return map;
+};
+
+const sumMapValues = (map) => {
+  let total = 0;
+  map.forEach((value) => {
+    total += Number(value || 0);
+  });
+  return total;
+};
+
+const normalizePercent = (value, max) => {
+  if (!max || max <= 0) return 0;
+  return Math.round((Number(value || 0) / max) * 100);
+};
+
 const TasteProfilePanel = () => {
-  const [profile, setProfile] = useState(null);
+  const [spotifyProfile, setSpotifyProfile] = useState(null);
+  const [soundcloudProfile, setSoundcloudProfile] = useState(null);
   const [savedEvents, setSavedEvents] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -36,11 +67,13 @@ const TasteProfilePanel = () => {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [spotifyProfile, saved] = await Promise.all([
+        const [spotifyData, soundcloudData, saved] = await Promise.all([
           authAPI.getSpotifyProfile().catch(() => null),
+          authAPI.getSoundCloudProfile().catch(() => null),
           eventsAPI.getSavedEvents().catch(() => [])
         ]);
-        setProfile(spotifyProfile);
+        setSpotifyProfile(spotifyData);
+        setSoundcloudProfile(soundcloudData);
         setSavedEvents(Array.isArray(saved) ? saved : saved?.events || []);
       } catch (error) {
         console.error('Taste profile load error:', error);
@@ -59,27 +92,36 @@ const TasteProfilePanel = () => {
     );
   }
 
-  // Build genre affinity map from Spotify and saved events
-  const genreMap = {};
-
-  // Add Spotify genres (higher weight)
-  const spotifyGenres = profile?.top_genres || [];
-  spotifyGenres.forEach((g, index) => {
-    const genre = typeof g === 'object' ? g.genre : g;
-    const count = typeof g === 'object' ? g.count : spotifyGenres.length - index;
-    genreMap[genre] = (genreMap[genre] || 0) + (count * 2);
-  });
-
-  // Add saved event genres
-  savedEvents.forEach(event => {
-    const genres = event.genres || [];
-    genres.forEach(genre => {
-      genreMap[genre] = (genreMap[genre] || 0) + 1;
+  const spotifyGenreMap = toGenreCountMap(spotifyProfile?.top_genres || []);
+  const soundcloudGenreMap = toGenreCountMap(soundcloudProfile?.top_genres || []);
+  const savedGenreMap = (() => {
+    const map = new Map();
+    savedEvents.forEach((event) => {
+      const genres = Array.isArray(event?.genres) ? event.genres : [];
+      genres.forEach((genre) => {
+        const token = normalizeToken(genre);
+        if (!token) return;
+        map.set(token, (map.get(token) || 0) + 1);
+      });
     });
-  });
+    return map;
+  })();
 
-  // Get top 6-8 genres
-  const topGenres = Object.entries(genreMap)
+  const combinedGenreMap = (() => {
+    const map = new Map();
+    spotifyGenreMap.forEach((value, genre) => {
+      map.set(genre, (map.get(genre) || 0) + (value * 2));
+    });
+    soundcloudGenreMap.forEach((value, genre) => {
+      map.set(genre, (map.get(genre) || 0) + Math.round(value * 1.8));
+    });
+    savedGenreMap.forEach((value, genre) => {
+      map.set(genre, (map.get(genre) || 0) + value);
+    });
+    return map;
+  })();
+
+  const topGenres = Array.from(combinedGenreMap.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8)
     .map(([genre, count]) => ({ genre, count }));
@@ -116,20 +158,19 @@ const TasteProfilePanel = () => {
           Build your taste profile
         </h3>
         <p style={{ fontSize: '0.85rem', color: '#a0a0a0', marginBottom: '1.25rem' }}>
-          Connect Spotify and save events to see your musical preferences visualized
+          Connect Spotify or SoundCloud and save events to see your musical preferences visualized
         </p>
       </motion.div>
     );
   }
 
-  // Normalize counts to 0-100 scale
   const maxCount = Math.max(...topGenres.map(g => g.count));
   const normalizedData = topGenres.map(g => Math.round((g.count / maxCount) * 100));
 
-  const chartData = {
+  const radarData = {
     labels: topGenres.map(g => g.genre),
     datasets: [{
-      label: 'Genre Affinity',
+      label: 'Combined Taste Affinity',
       data: normalizedData,
       backgroundColor: 'rgba(167, 139, 250, 0.15)',
       borderColor: '#a78bfa',
@@ -143,7 +184,7 @@ const TasteProfilePanel = () => {
     }]
   };
 
-  const chartOptions = {
+  const radarOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
@@ -189,7 +230,78 @@ const TasteProfilePanel = () => {
     }
   };
 
-  // Calculate diversity score (how evenly distributed)
+  const compareLabels = topGenres.slice(0, 6).map((item) => item.genre);
+  const spotifyMax = Math.max(sumMapValues(spotifyGenreMap) > 0 ? Math.max(...Array.from(spotifyGenreMap.values())) : 0, 1);
+  const soundcloudMax = Math.max(sumMapValues(soundcloudGenreMap) > 0 ? Math.max(...Array.from(soundcloudGenreMap.values())) : 0, 1);
+  const compareData = {
+    labels: compareLabels,
+    datasets: [
+      {
+        label: 'Spotify',
+        data: compareLabels.map((genre) => normalizePercent(spotifyGenreMap.get(genre), spotifyMax)),
+        backgroundColor: 'rgba(29,185,84,0.45)',
+        borderColor: '#1DB954',
+        borderWidth: 1
+      },
+      {
+        label: 'SoundCloud',
+        data: compareLabels.map((genre) => normalizePercent(soundcloudGenreMap.get(genre), soundcloudMax)),
+        backgroundColor: 'rgba(255,140,66,0.45)',
+        borderColor: '#ff8c42',
+        borderWidth: 1
+      }
+    ]
+  };
+
+  const compareOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        min: 0,
+        max: 100,
+        ticks: { color: '#a0a0a0' },
+        grid: { color: 'rgba(255,255,255,0.08)' }
+      },
+      x: {
+        ticks: { color: '#d0d0d0' },
+        grid: { color: 'rgba(255,255,255,0.03)' }
+      }
+    },
+    plugins: {
+      legend: {
+        labels: {
+          color: '#f5f5f5',
+          boxWidth: 12
+        }
+      }
+    }
+  };
+
+  const spotifyTotal = sumMapValues(spotifyGenreMap);
+  const soundcloudTotal = sumMapValues(soundcloudGenreMap);
+  const savedTotal = sumMapValues(savedGenreMap);
+  const sourceData = {
+    labels: ['Spotify', 'SoundCloud', 'Saved Events'],
+    datasets: [{
+      data: [spotifyTotal, soundcloudTotal, savedTotal],
+      backgroundColor: ['#1DB954', '#ff8c42', '#4fc3f7'],
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.12)'
+    }]
+  };
+
+  const sourceOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { color: '#d0d0d0', boxWidth: 12, padding: 12 }
+      }
+    }
+  };
+
   const diversity = topGenres.length >= 5 ? 'High' : topGenres.length >= 3 ? 'Medium' : 'Focused';
   const diversityColor = diversity === 'High' ? '#00d67d' : diversity === 'Medium' ? '#f5a623' : '#4fc3f7';
 
@@ -227,7 +339,7 @@ const TasteProfilePanel = () => {
               Your Taste Profile
             </h3>
             <p style={{ fontSize: '0.78rem', color: '#a0a0a0' }}>
-              Based on {spotifyGenres.length > 0 ? 'Spotify + ' : ''}{savedEvents.length} saved events
+              Built from Spotify, SoundCloud, and {savedEvents.length} saved events
             </p>
           </div>
           <div style={{
@@ -245,9 +357,16 @@ const TasteProfilePanel = () => {
         </div>
       </div>
 
-      {/* Radar Chart */}
-      <div style={{ height: 280, marginBottom: '1rem' }}>
-        <Radar data={chartData} options={chartOptions} />
+      <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', marginBottom: '1rem' }}>
+        <div style={{ height: 280 }}>
+          <Radar data={radarData} options={radarOptions} />
+        </div>
+        <div style={{ height: 280 }}>
+          <Bar data={compareData} options={compareOptions} />
+        </div>
+        <div style={{ height: 280 }}>
+          <Doughnut data={sourceData} options={sourceOptions} />
+        </div>
       </div>
 
       {/* Genre List */}

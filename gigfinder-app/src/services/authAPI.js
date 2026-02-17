@@ -21,6 +21,26 @@ const authAPI = {
     const response = await authClient.get('/auth/spotify/profile');
     return response.data;
   },
+  getSoundCloudStatus: async () => {
+    const response = await authClient.get('/auth/soundcloud/status');
+    return response.data;
+  },
+  connectSoundCloud: async (payload) => {
+    const response = await authClient.post('/auth/soundcloud/connect', payload);
+    return response.data;
+  },
+  syncSoundCloud: async () => {
+    const response = await authClient.post('/auth/soundcloud/sync');
+    return response.data;
+  },
+  getSoundCloudProfile: async () => {
+    const response = await authClient.get('/auth/soundcloud/profile');
+    return response.data;
+  },
+  disconnectSoundCloud: async () => {
+    const response = await authClient.delete('/auth/soundcloud/disconnect');
+    return response.data;
+  },
   getPreferences: async () => {
     const response = await authClient.get('/auth/preferences');
     return response.data;

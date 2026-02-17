@@ -99,7 +99,7 @@ export const getImageSrcSet = (images) => {
 const requestQueue = {
   queue: [],
   processing: false,
-  delay: 300, // 300ms between requests
+  delay: 450, // spread API calls to avoid 429 bursts
 
   add(fn) {
     return new Promise((resolve, reject) => {
@@ -127,6 +127,24 @@ const requestQueue = {
       this.process();
     }, this.delay);
   }
+};
+
+const MISS_TTL_MS = 60 * 60 * 1000;
+const missCache = new Map();
+const pendingArtistImageRequests = new Map();
+
+const isMissCached = (key) => {
+  const expiresAt = missCache.get(key);
+  if (!expiresAt) return false;
+  if (expiresAt <= Date.now()) {
+    missCache.delete(key);
+    return false;
+  }
+  return true;
+};
+
+const cacheMiss = (key) => {
+  missCache.set(key, Date.now() + MISS_TTL_MS);
 };
 
 /**
@@ -184,6 +202,7 @@ export const fetchSpotifyArtistImage = async (artistName) => {
   const cacheKey = `img_spotify_${artistName.toLowerCase().trim()}`;
   const cached = imageCacheStrategy(cacheKey);
   if (cached) return cached;
+  if (isMissCached(cacheKey)) return null;
 
   // Add to queue to prevent rate limiting
   return requestQueue.add(async () => {
@@ -205,11 +224,14 @@ export const fetchSpotifyArtistImage = async (artistName) => {
 
       if (imageUrl) {
         imageCacheStrategy(cacheKey, imageUrl);
+        return imageUrl;
       }
 
-      return imageUrl;
+      cacheMiss(cacheKey);
+      return null;
     } catch (error) {
       console.warn('Failed to fetch Spotify image for:', artistName, error);
+      cacheMiss(cacheKey);
       return null;
     }
   });
@@ -257,6 +279,7 @@ export const fetchSoundCloudArtistImage = async (artistName) => {
   const cacheKey = `img_soundcloud_${artistName.toLowerCase().trim()}`;
   const cached = imageCacheStrategy(cacheKey);
   if (cached) return cached;
+  if (isMissCached(cacheKey)) return null;
 
   return requestQueue.add(async () => {
     try {
@@ -280,11 +303,14 @@ export const fetchSoundCloudArtistImage = async (artistName) => {
 
       if (imageUrl) {
         imageCacheStrategy(cacheKey, imageUrl);
+        return imageUrl;
       }
 
-      return imageUrl;
+      cacheMiss(cacheKey);
+      return null;
     } catch (error) {
       console.warn('Failed to fetch SoundCloud image for:', artistName, error);
+      cacheMiss(cacheKey);
       return null;
     }
   });
@@ -301,6 +327,7 @@ export const fetchMixcloudArtistImage = async (artistName) => {
   const cacheKey = `img_mixcloud_${artistName.toLowerCase().trim()}`;
   const cached = imageCacheStrategy(cacheKey);
   if (cached) return cached;
+  if (isMissCached(cacheKey)) return null;
 
   try {
     // Use Mixcloud API search
@@ -316,11 +343,14 @@ export const fetchMixcloudArtistImage = async (artistName) => {
 
     if (imageUrl) {
       imageCacheStrategy(cacheKey, imageUrl);
+      return imageUrl;
     }
 
-    return imageUrl;
+    cacheMiss(cacheKey);
+    return null;
   } catch (error) {
     console.warn('Failed to fetch Mixcloud image for:', artistName, error);
+    cacheMiss(cacheKey);
     return null;
   }
 };
@@ -332,18 +362,32 @@ export const fetchMixcloudArtistImage = async (artistName) => {
  */
 export const fetchArtistImage = async (artistName) => {
   if (!artistName) return null;
+  const normalizedName = artistName.toLowerCase().trim();
+  if (!normalizedName) return null;
 
-  // Prefer SoundCloud first for broader artist coverage.
-  let imageUrl = await fetchSoundCloudArtistImage(artistName);
-  if (imageUrl) return imageUrl;
+  if (pendingArtistImageRequests.has(normalizedName)) {
+    return pendingArtistImageRequests.get(normalizedName);
+  }
 
-  // Then Spotify (quality fallback).
-  imageUrl = await fetchSpotifyArtistImage(artistName);
-  if (imageUrl) return imageUrl;
+  const task = (async () => {
+    // Prefer SoundCloud first for broader artist coverage.
+    let imageUrl = await fetchSoundCloudArtistImage(artistName);
+    if (imageUrl) return imageUrl;
 
-  // Use Mixcloud (no rate limits)
-  imageUrl = await fetchMixcloudArtistImage(artistName);
-  if (imageUrl) return imageUrl;
+    // Then Spotify (quality fallback).
+    imageUrl = await fetchSpotifyArtistImage(artistName);
+    if (imageUrl) return imageUrl;
 
-  return null;
+    // Use Mixcloud.
+    imageUrl = await fetchMixcloudArtistImage(artistName);
+    if (imageUrl) return imageUrl;
+
+    return null;
+  })()
+    .finally(() => {
+      pendingArtistImageRequests.delete(normalizedName);
+    });
+
+  pendingArtistImageRequests.set(normalizedName, task);
+  return task;
 };

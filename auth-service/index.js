@@ -40,6 +40,8 @@ const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI;
 const SPOTIFY_SCOPES = process.env.SPOTIFY_SCOPES || 'user-top-read user-follow-read user-library-read user-read-email';
+const SOUNDCLOUD_CLIENT_ID = process.env.SOUNDCLOUD_CLIENT_ID || null;
+const SOUNDCLOUD_GENRE_TAG_LIMIT = Number.parseInt(process.env.SOUNDCLOUD_GENRE_TAG_LIMIT || '20', 10);
 
 const warnOnMissingEnv = () => {
   const missing = [];
@@ -135,6 +137,21 @@ const ensureColumn = async (tableName, columnName, columnDefinition) => {
 
 const ensureAuthSchema = async () => {
   try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_soundcloud (
+        user_id BIGINT NOT NULL PRIMARY KEY,
+        soundcloud_user_id BIGINT NULL,
+        username VARCHAR(255) NULL,
+        permalink_url VARCHAR(512) NULL,
+        avatar_url VARCHAR(1024) NULL,
+        top_artists JSON DEFAULT NULL,
+        top_genres JSON DEFAULT NULL,
+        last_synced_at TIMESTAMP NULL DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+
     await ensureColumn('users', 'role', "VARCHAR(32) DEFAULT 'user'");
     await ensureColumn('user_preferences', 'preferred_venues', 'JSON DEFAULT NULL');
     await ensureColumn('user_preferences', 'preferred_djs', 'JSON DEFAULT NULL');
@@ -202,9 +219,21 @@ if (process.env.TRUST_PROXY === 'true') {
   app.set('trust proxy', 1);
 }
 
+const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex').slice(0, 24);
+const resolveIpKey = (ip) => (typeof rateLimit.ipKeyGenerator === 'function' ? rateLimit.ipKeyGenerator(ip) : (ip || 'unknown'));
+const rateLimitKey = (req) => {
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    return `token:${hashToken(authHeader.slice(7))}`;
+  }
+  return `ip:${resolveIpKey(req.ip || req.socket?.remoteAddress)}`;
+};
+
 const rateLimiter = rateLimit({
   windowMs: parseIntOrDefault(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
-  max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 120),
+  max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 240),
+  keyGenerator: rateLimitKey,
+  skip: (req) => req.path === '/health' || req.path === '/metrics',
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -271,6 +300,268 @@ const getUserIdFromToken = (token) => {
 
 const spotifyConfigured = () => {
   return Boolean(SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET && SPOTIFY_REDIRECT_URI);
+};
+
+const soundcloudConfigured = () => Boolean(SOUNDCLOUD_CLIENT_ID);
+
+const normalizeSoundcloudToken = (value) => (value || '')
+  .toString()
+  .toLowerCase()
+  .trim();
+
+const normalizeSoundcloudProfileInput = (value) => {
+  const input = (value || '').toString().trim();
+  if (!input) return '';
+  if (input.includes('soundcloud.com/')) {
+    return input.startsWith('http://') || input.startsWith('https://')
+      ? input
+      : `https://${input}`;
+  }
+  if (input.startsWith('http://') || input.startsWith('https://')) {
+    return input;
+  }
+  return input.replace(/^@/, '');
+};
+
+const fetchSoundcloudJson = async (url) => {
+  if (!soundcloudConfigured()) {
+    const error = new Error('SoundCloud is not configured');
+    error.status = 500;
+    throw error;
+  }
+
+  const parsed = new URL(url);
+  parsed.searchParams.set('client_id', SOUNDCLOUD_CLIENT_ID);
+
+  const res = await fetch(parsed.toString(), {
+    headers: { Accept: 'application/json' }
+  });
+  const text = await res.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
+  }
+  if (!res.ok) {
+    const message = data.error_message || data.error?.message || data.error || 'SoundCloud API error';
+    const error = new Error(message);
+    error.status = res.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+};
+
+const resolveSoundcloudUser = async (profileInput) => {
+  const normalizedInput = normalizeSoundcloudProfileInput(profileInput);
+  if (!normalizedInput) {
+    const error = new Error('SoundCloud profile URL or username is required');
+    error.status = 400;
+    throw error;
+  }
+
+  // Resolve direct SoundCloud profile URL first.
+  if (normalizedInput.startsWith('http://') || normalizedInput.startsWith('https://')) {
+    const resolved = await fetchSoundcloudJson(`https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(normalizedInput)}`);
+    if ((resolved?.kind || '') === 'user' || resolved?.username) {
+      return resolved;
+    }
+    const error = new Error('Provided SoundCloud URL did not resolve to a user profile');
+    error.status = 400;
+    throw error;
+  }
+
+  // Resolve username by search.
+  const search = await fetchSoundcloudJson(`https://api-v2.soundcloud.com/search/users?q=${encodeURIComponent(normalizedInput)}&limit=20`);
+  const users = Array.isArray(search?.collection) ? search.collection : [];
+  if (!users.length) {
+    const error = new Error('No SoundCloud user found for the provided profile');
+    error.status = 404;
+    throw error;
+  }
+
+  const target = normalizeSoundcloudToken(normalizedInput);
+  const best = users.find((user) => {
+    const usernameToken = normalizeSoundcloudToken(user?.username);
+    const permalinkToken = normalizeSoundcloudToken(user?.permalink);
+    const fullNameToken = normalizeSoundcloudToken(user?.full_name);
+    return usernameToken === target || permalinkToken === target || fullNameToken === target;
+  }) || users[0];
+  return best;
+};
+
+const splitSoundcloudTags = (value) => {
+  if (!value) return [];
+  const raw = value
+    .toString()
+    .replace(/"/g, ' ')
+    .replace(/#/g, ' ')
+    .replace(/,/g, ' ')
+    .replace(/\|/g, ' ');
+  return raw
+    .split(/\s+/)
+    .map(normalizeSoundcloudToken)
+    .filter((token) => token.length >= 3 && token.length <= 40);
+};
+
+const computeSoundcloudTopGenres = (tracks) => {
+  const counts = new Map();
+  (tracks || []).forEach((track) => {
+    const candidates = new Set([
+      normalizeSoundcloudToken(track?.genre),
+      ...splitSoundcloudTags(track?.tag_list)
+    ]);
+    candidates.forEach((genre) => {
+      if (!genre) return;
+      counts.set(genre, (counts.get(genre) || 0) + 1);
+    });
+  });
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, SOUNDCLOUD_GENRE_TAG_LIMIT)
+    .map(([genre, count]) => ({ genre, count }));
+};
+
+const computeSoundcloudTopArtists = (tracks, fallbackName) => {
+  const counts = new Map();
+  (tracks || []).forEach((track) => {
+    const candidates = [
+      track?.publisher_metadata?.artist,
+      track?.user?.username,
+      track?.user?.full_name
+    ].map(normalizeSoundcloudToken).filter(Boolean);
+    candidates.forEach((artist) => {
+      counts.set(artist, (counts.get(artist) || 0) + 1);
+    });
+  });
+
+  if (counts.size === 0 && fallbackName) {
+    const fallback = normalizeSoundcloudToken(fallbackName);
+    if (fallback) counts.set(fallback, 1);
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20)
+    .map(([name, count]) => ({ name, count }));
+};
+
+const getSoundcloudProfile = async (userId) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT user_id, soundcloud_user_id, username, permalink_url, avatar_url,
+              top_artists, top_genres, last_synced_at
+       FROM user_soundcloud
+       WHERE user_id = ?`,
+      [userId]
+    );
+    return rows[0] || null;
+  } catch (err) {
+    if (err?.code === 'ER_NO_SUCH_TABLE') {
+      return null;
+    }
+    throw err;
+  }
+};
+
+const upsertSoundcloudProfile = async ({
+  userId,
+  soundcloudUserId,
+  username,
+  permalinkUrl,
+  avatarUrl,
+  topArtists,
+  topGenres
+}) => {
+  const params = [
+    userId,
+    soundcloudUserId || null,
+    username || null,
+    permalinkUrl || null,
+    avatarUrl || null,
+    JSON.stringify(topArtists || []),
+    JSON.stringify(topGenres || [])
+  ];
+
+  const statement = `INSERT INTO user_soundcloud
+    (user_id, soundcloud_user_id, username, permalink_url, avatar_url, top_artists, top_genres, last_synced_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+   ON DUPLICATE KEY UPDATE
+     soundcloud_user_id = VALUES(soundcloud_user_id),
+     username = VALUES(username),
+     permalink_url = VALUES(permalink_url),
+     avatar_url = VALUES(avatar_url),
+     top_artists = VALUES(top_artists),
+     top_genres = VALUES(top_genres),
+     last_synced_at = CURRENT_TIMESTAMP`;
+
+  try {
+    await pool.query(statement, params);
+  } catch (err) {
+    if (err?.code !== 'ER_NO_SUCH_TABLE') throw err;
+    await ensureAuthSchema();
+    await pool.query(statement, params);
+  }
+};
+
+const parseJsonField = (value, fallback = []) => {
+  if (!value) return fallback;
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+};
+
+const syncSoundcloudProfile = async (userId, profileInput = null) => {
+  if (!soundcloudConfigured()) {
+    const error = new Error('SoundCloud is not configured');
+    error.status = 500;
+    throw error;
+  }
+
+  let user = null;
+  const normalizedInput = normalizeSoundcloudProfileInput(profileInput);
+  if (normalizedInput) {
+    user = await resolveSoundcloudUser(normalizedInput);
+  } else {
+    const existing = await getSoundcloudProfile(userId);
+    if (!existing) {
+      return { synced: false, reason: 'not_linked' };
+    }
+    user = await resolveSoundcloudUser(existing.permalink_url || existing.username);
+  }
+
+  const tracksResponse = await fetchSoundcloudJson(
+    `https://api-v2.soundcloud.com/users/${encodeURIComponent(String(user.id))}/tracks?limit=200`
+  );
+  const tracks = Array.isArray(tracksResponse?.collection) ? tracksResponse.collection : [];
+  const topGenres = computeSoundcloudTopGenres(tracks);
+  const topArtists = computeSoundcloudTopArtists(tracks, user.username || user.full_name);
+
+  await upsertSoundcloudProfile({
+    userId,
+    soundcloudUserId: user.id,
+    username: user.username || user.permalink || null,
+    permalinkUrl: user.permalink_url || null,
+    avatarUrl: user.avatar_url || null,
+    topArtists,
+    topGenres
+  });
+
+  return {
+    synced: true,
+    username: user.username || null,
+    permalink_url: user.permalink_url || null,
+    avatar_url: user.avatar_url || null,
+    top_artists: topArtists,
+    top_genres: topGenres
+  };
 };
 
 const buildSpotifyAuthUrl = (state) => {
@@ -685,21 +976,92 @@ app.get('/auth/spotify/profile', requireAuth, asyncHandler(async (req, res) => {
   if (rows.length === 0) {
     return sendError(res, 404, 'spotify_not_linked', 'Spotify account not linked');
   }
-  const parseJson = (value, fallback = []) => {
-    if (!value) return fallback;
-    try {
-      return JSON.parse(value);
-    } catch {
-      return fallback;
-    }
-  };
   const row = rows[0];
   return res.json({
-    top_artists: parseJson(row.top_artists),
-    top_genres: parseJson(row.top_genres),
+    top_artists: parseJsonField(row.top_artists),
+    top_genres: parseJsonField(row.top_genres),
     last_synced_at: row.last_synced_at
   });
 }));
+
+app.get('/auth/soundcloud/status', requireAuth, asyncHandler(async (req, res) => {
+  const row = await getSoundcloudProfile(req.user.user_id);
+  return res.json({
+    linked: Boolean(row),
+    username: row?.username || null,
+    permalink_url: row?.permalink_url || null,
+    avatar_url: row?.avatar_url || null,
+    last_synced_at: row?.last_synced_at || null
+  });
+}));
+
+app.post('/auth/soundcloud/connect', requireAuth, async (req, res) => {
+  const schema = z.object({
+    profile: z.string().min(1)
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return sendError(res, 400, 'invalid_body', 'Invalid request body', parsed.error.flatten());
+  }
+
+  try {
+    const result = await syncSoundcloudProfile(req.user.user_id, parsed.data.profile);
+    return res.json({
+      linked: true,
+      ...result
+    });
+  } catch (err) {
+    console.error('SoundCloud connect error:', err.message);
+    if (isDatabaseConnectionError(err)) {
+      return sendError(res, 503, 'database_unavailable', 'Database is currently unavailable');
+    }
+    return sendError(res, err.status || 500, 'soundcloud_error', err.message || 'SoundCloud error');
+  }
+});
+
+app.post('/auth/soundcloud/sync', requireAuth, async (req, res) => {
+  try {
+    const result = await syncSoundcloudProfile(req.user.user_id);
+    if (!result.synced) {
+      return sendError(res, 400, 'soundcloud_not_linked', 'SoundCloud account not linked');
+    }
+    return res.json(result);
+  } catch (err) {
+    console.error('SoundCloud sync error:', err.message);
+    if (isDatabaseConnectionError(err)) {
+      return sendError(res, 503, 'database_unavailable', 'Database is currently unavailable');
+    }
+    return sendError(res, err.status || 500, 'soundcloud_error', err.message || 'SoundCloud error');
+  }
+});
+
+app.get('/auth/soundcloud/profile', requireAuth, asyncHandler(async (req, res) => {
+  const row = await getSoundcloudProfile(req.user.user_id);
+  if (!row) {
+    return sendError(res, 404, 'soundcloud_not_linked', 'SoundCloud account not linked');
+  }
+  return res.json({
+    username: row.username || null,
+    permalink_url: row.permalink_url || null,
+    avatar_url: row.avatar_url || null,
+    top_artists: parseJsonField(row.top_artists),
+    top_genres: parseJsonField(row.top_genres),
+    last_synced_at: row.last_synced_at
+  });
+}));
+
+app.delete('/auth/soundcloud/disconnect', requireAuth, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM user_soundcloud WHERE user_id = ?', [req.user.user_id]);
+    return res.json({ linked: false });
+  } catch (err) {
+    console.error('SoundCloud disconnect error:', err.message);
+    if (isDatabaseConnectionError(err)) {
+      return sendError(res, 503, 'database_unavailable', 'Database is currently unavailable');
+    }
+    return sendError(res, 500, 'soundcloud_error', 'Failed to disconnect SoundCloud');
+  }
+});
 
 app.get('/auth/preferences', requireAuth, asyncHandler(async (req, res) => {
   const [rows] = await pool.query(

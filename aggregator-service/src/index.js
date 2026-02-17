@@ -59,9 +59,21 @@ if (process.env.TRUST_PROXY === 'true') {
   app.set('trust proxy', 1);
 }
 
+const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex').slice(0, 24);
+const resolveIpKey = (ip) => (typeof rateLimit.ipKeyGenerator === 'function' ? rateLimit.ipKeyGenerator(ip) : (ip || 'unknown'));
+const rateLimitKey = (req) => {
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    return `token:${hashToken(authHeader.slice(7))}`;
+  }
+  return `ip:${resolveIpKey(req.ip || req.socket?.remoteAddress)}`;
+};
+
 const rateLimiter = rateLimit({
   windowMs: parseIntOrDefault(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
-  max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 60),
+  max: parseIntOrDefault(process.env.RATE_LIMIT_MAX, 240),
+  keyGenerator: rateLimitKey,
+  skip: (req) => req.path === '/health' || req.path === '/metrics',
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -172,6 +184,11 @@ app.get('/v1/auth/spotify/callback', (req, res) => proxyRequest(req, res, { url:
 app.get('/v1/auth/spotify/status', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/spotify/status` }));
 app.post('/v1/auth/spotify/sync', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/spotify/sync`, method: 'post' }));
 app.get('/v1/auth/spotify/profile', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/spotify/profile` }));
+app.get('/v1/auth/soundcloud/status', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/soundcloud/status` }));
+app.post('/v1/auth/soundcloud/connect', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/soundcloud/connect`, method: 'post' }));
+app.post('/v1/auth/soundcloud/sync', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/soundcloud/sync`, method: 'post' }));
+app.get('/v1/auth/soundcloud/profile', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/soundcloud/profile` }));
+app.delete('/v1/auth/soundcloud/disconnect', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/soundcloud/disconnect`, method: 'delete' }));
 app.get('/v1/auth/preferences', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/preferences` }));
 app.post('/v1/auth/preferences', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/preferences`, method: 'post' }));
 
