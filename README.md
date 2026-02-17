@@ -152,6 +152,7 @@ Manual run (inside `events-service`):
 - Cheapest baseline is EC2 `t4g.micro` running Docker Compose.
 - See `docs/ops-runbook.md` for verification and recovery steps.
 - Secrets must be injected at runtime; do not commit `.env`.
+- Make sure your runtime secrets include `SOUNDCLOUD_CLIENT_ID`/`SOUNDCLOUD_CLIENT_SECRET`; otherwise SoundCloud enrichment/image coverage will stay limited.
 
 ## Frontends
 Primary UI:

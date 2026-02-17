@@ -72,7 +72,9 @@ const warnOnMissingEnv = () => {
   if (INGESTION_ENABLED && !EVENTBRITE_API_TOKEN) warnings.push('INGESTION_ENABLED without EVENTBRITE_API_TOKEN');
   if (DICE_APIFY_ENABLED && !APIFY_TOKEN) warnings.push('DICE_APIFY_ENABLED without APIFY_TOKEN');
   if (BANDSINTOWN_APP_ID === null) warnings.push('BANDSINTOWN_APP_ID not set');
-  if (SOUNDCLOUD_ENABLED && !SOUNDCLOUD_CLIENT_ID) warnings.push('SOUNDCLOUD_ENABLED without SOUNDCLOUD_CLIENT_ID');
+  if (SOUNDCLOUD_ENABLED && (!SOUNDCLOUD_CLIENT_ID || !SOUNDCLOUD_CLIENT_SECRET)) {
+    warnings.push('Make sure your runtime secrets include SOUNDCLOUD_CLIENT_ID/SOUNDCLOUD_CLIENT_SECRET; otherwise SoundCloud enrichment/image coverage will stay limited.');
+  }
 
   const messages = [];
   if (missing.length) messages.push(`Missing required env: ${missing.join(', ')}`);
