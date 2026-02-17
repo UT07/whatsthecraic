@@ -268,6 +268,67 @@ const isLikelyPlaceholderImage = (url) => {
   return token.includes('default_avatar') || token.includes('default_user');
 };
 
+const normalizeSoundcloudProfileUrl = (value) => {
+  const raw = (value || '').toString().trim();
+  if (!raw) return null;
+  if (!raw.includes('soundcloud.com/')) return null;
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
+  try {
+    const parsed = new URL(withScheme);
+    if (!parsed.hostname.toLowerCase().includes('soundcloud.com')) return null;
+    const username = parsed.pathname.split('/').filter(Boolean)[0];
+    if (!username) return null;
+    return `https://soundcloud.com/${username}`;
+  } catch {
+    return null;
+  }
+};
+
+const toBestSoundcloudAvatar = (url) => {
+  if (!url) return null;
+  const value = url.toString();
+  return value.includes('-large.')
+    ? value.replace('-large.', '-t500x500.')
+    : value;
+};
+
+/**
+ * Fetch artist/profile image directly from a SoundCloud profile URL.
+ * Uses SoundCloud oEmbed so we can resolve profile thumbnails from local DB URLs.
+ */
+export const fetchSoundCloudImageFromUrl = async (soundcloudUrl) => {
+  const profileUrl = normalizeSoundcloudProfileUrl(soundcloudUrl);
+  if (!profileUrl) return null;
+
+  const cacheKey = `img_soundcloud_url_${profileUrl.toLowerCase()}`;
+  const cached = imageCacheStrategy(cacheKey);
+  if (cached) return cached;
+  if (isMissCached(cacheKey)) return null;
+
+  return requestQueue.add(async () => {
+    try {
+      const response = await fetch(
+        `https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(profileUrl)}`
+      );
+      if (!response.ok) return null;
+
+      const data = await response.json();
+      const imageUrl = toBestSoundcloudAvatar(data?.thumbnail_url || null);
+      if (imageUrl && !isLikelyPlaceholderImage(imageUrl)) {
+        imageCacheStrategy(cacheKey, imageUrl);
+        return imageUrl;
+      }
+
+      cacheMiss(cacheKey);
+      return null;
+    } catch (error) {
+      console.warn('Failed to fetch SoundCloud profile image for URL:', profileUrl, error);
+      cacheMiss(cacheKey);
+      return null;
+    }
+  });
+};
+
 /**
  * Fetch artist image from SoundCloud via backend /v1/performers
  * @param {string} artistName - Name of the artist
@@ -358,18 +419,29 @@ export const fetchMixcloudArtistImage = async (artistName) => {
 /**
  * Fetch best available artist image (tries multiple sources)
  * @param {string} artistName - Name of the artist
+ * @param {object} options
+ * @param {string|null} options.soundcloudUrl - Optional direct SoundCloud URL from local DB
  * @returns {Promise<string|null>} Image URL or null
  */
-export const fetchArtistImage = async (artistName) => {
+export const fetchArtistImage = async (artistName, options = {}) => {
   if (!artistName) return null;
   const normalizedName = artistName.toLowerCase().trim();
+  const normalizedSoundcloudUrl = normalizeSoundcloudProfileUrl(options?.soundcloudUrl || null);
   if (!normalizedName) return null;
 
-  if (pendingArtistImageRequests.has(normalizedName)) {
-    return pendingArtistImageRequests.get(normalizedName);
+  const requestKey = `${normalizedName}|${normalizedSoundcloudUrl || ''}`;
+
+  if (pendingArtistImageRequests.has(requestKey)) {
+    return pendingArtistImageRequests.get(requestKey);
   }
 
   const task = (async () => {
+    // Prefer explicit SoundCloud profile URL (local DB source of truth).
+    if (normalizedSoundcloudUrl) {
+      const directImage = await fetchSoundCloudImageFromUrl(normalizedSoundcloudUrl);
+      if (directImage) return directImage;
+    }
+
     // Prefer SoundCloud first for broader artist coverage.
     let imageUrl = await fetchSoundCloudArtistImage(artistName);
     if (imageUrl) return imageUrl;
@@ -385,9 +457,9 @@ export const fetchArtistImage = async (artistName) => {
     return null;
   })()
     .finally(() => {
-      pendingArtistImageRequests.delete(normalizedName);
+      pendingArtistImageRequests.delete(requestKey);
     });
 
-  pendingArtistImageRequests.set(normalizedName, task);
+  pendingArtistImageRequests.set(requestKey, task);
   return task;
 };

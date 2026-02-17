@@ -73,6 +73,7 @@ const DJs = () => {
   const [performers, setPerformers] = useState([]);
   const [performersLoading, setPerformersLoading] = useState(false);
   const [spotifyProfile, setSpotifyProfile] = useState(null);
+  const [localOnly, setLocalOnly] = useState(false);
 
   const [filters, setFilters] = useState({ q: '', city: '', genres: '', feeMax: '' });
   const { register, handleSubmit, reset } = useForm();
@@ -94,33 +95,13 @@ const DJs = () => {
     }
   };
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchDJs(); loadPerformers(); }, []);
-
-  useEffect(() => {
-    authAPI.getSpotifyProfile()
-      .then(setSpotifyProfile)
-      .catch(() => setSpotifyProfile(null));
-  }, []);
-
-  const runSearch = async () => {
-    setSearching(true);
-    await fetchDJs(true);
-    setSearching(false);
-  };
-
-  const resetSearch = async () => {
-    setFilters({ q: '', city: '', genres: '', feeMax: '' });
-    await fetchDJs(false);
-  };
-
-  const loadPerformers = async () => {
+  const loadPerformers = async (activeFilters = filters, localOnlyOverride = localOnly) => {
     setPerformersLoading(true);
     try {
       const data = await eventsAPI.getPerformers({
-        city: filters.city || undefined,
-        q: filters.q || undefined,
-        include: 'ticketmaster,spotify,mixcloud,soundcloud',
+        city: activeFilters.city || undefined,
+        q: activeFilters.q || undefined,
+        include: localOnlyOverride ? 'local' : 'local,ticketmaster,spotify,mixcloud,soundcloud',
         limit: 200
       });
       setPerformers(data.performers || []);
@@ -130,6 +111,38 @@ const DJs = () => {
     } finally {
       setPerformersLoading(false);
     }
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchDJs(); }, []);
+
+  useEffect(() => {
+    authAPI.getSpotifyProfile()
+      .then(setSpotifyProfile)
+      .catch(() => setSpotifyProfile(null));
+  }, []);
+
+  useEffect(() => {
+    loadPerformers(filters, localOnly);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localOnly]);
+
+  const runSearch = async () => {
+    setSearching(true);
+    await Promise.all([
+      fetchDJs(true),
+      loadPerformers(filters, localOnly)
+    ]);
+    setSearching(false);
+  };
+
+  const resetSearch = async () => {
+    const resetState = { q: '', city: '', genres: '', feeMax: '' };
+    setFilters(resetState);
+    await Promise.all([
+      fetchDJs(false),
+      loadPerformers(resetState, localOnly)
+    ]);
   };
 
   const openModal = (dj = null) => {
@@ -237,6 +250,10 @@ const DJs = () => {
 
     return Array.from(byName.values())
       .filter((artist) => {
+        if (localOnly) {
+          const sourceSet = new Set((artist.sources || []).map((source) => normalizeToken(source)));
+          if (![...sourceSet].every((source) => source === 'local')) return false;
+        }
         if (qToken && !normalizeToken(artist.name).includes(qToken)) return false;
         if (cityToken) {
           const cityMatches = normalizeToken(artist.city).includes(cityToken);
@@ -268,7 +285,7 @@ const DJs = () => {
         }
         return (a.name || '').localeCompare(b.name || '');
       });
-  }, [djs, performers, spotifyProfile, filters]);
+  }, [djs, performers, spotifyProfile, filters, localOnly]);
 
   const UnifiedArtistCard = ({ artist, index }) => {
     const [artistImage, setArtistImage] = useState(artist.image || null);
@@ -278,12 +295,12 @@ const DJs = () => {
       const loadImage = async () => {
         if (artistImage || loadingImage || !artist.name) return;
         setLoadingImage(true);
-        const image = await fetchArtistImage(artist.name);
+        const image = await fetchArtistImage(artist.name, { soundcloudUrl: artist.soundcloud });
         if (image) setArtistImage(image);
         setLoadingImage(false);
       };
       loadImage();
-    }, [artist.name, artistImage, loadingImage]);
+    }, [artist.name, artist.soundcloud, artistImage, loadingImage]);
 
     return (
       <motion.div
@@ -370,9 +387,25 @@ const DJs = () => {
       {/* Header */}
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-end', gap: '1rem' }}>
         <div>
-          <span className="badge" style={{ marginBottom: '0.5rem' }}>Local Irish Selection</span>
+          <button
+            type="button"
+            className="badge"
+            onClick={() => setLocalOnly((value) => !value)}
+            style={{
+              marginBottom: '0.5rem',
+              border: 'none',
+              cursor: 'pointer',
+              background: localOnly ? 'linear-gradient(90deg, rgba(0,214,125,0.25), rgba(0,214,125,0.12))' : undefined
+            }}
+          >
+            {localOnly ? 'Local Irish Selection: ON' : 'Local Irish Selection'}
+          </button>
           <h1 className="section-title" style={{ marginBottom: '0.3rem' }}>Artists & DJs</h1>
-          <p className="section-subtitle">Unified artists across local DB + external APIs, ranked by your Spotify taste</p>
+          <p className="section-subtitle">
+            {localOnly
+              ? 'Showing only local DB artists from Ireland.'
+              : 'Unified artists across local DB + external APIs, ranked by your Spotify taste'}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button className="btn btn-outline btn-sm" onClick={loadPerformers} disabled={performersLoading}>

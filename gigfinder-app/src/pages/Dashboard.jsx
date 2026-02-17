@@ -6,7 +6,7 @@ import djAPI from '../services/djAPI';
 import venueAPI from '../services/venueAPI';
 import authAPI from '../services/authAPI';
 import mlAPI from '../services/mlAPI';
-import { getToken } from '../services/apiClient';
+import { getToken, AUTH_BASE } from '../services/apiClient';
 import { fetchArtistImage, resolveEventImage } from '../utils/imageUtils';
 import { groupEventsForDisplay, normalizeRecommendationEvent } from '../utils/eventGrouping';
 import { ExplainabilityModal, TasteProfilePanel, FeedbackButtons, EventDensityHeatMap } from '../components/ml';
@@ -446,7 +446,7 @@ const Dashboard = () => {
   const [selectedEvent, setSelectedEvent] = useState(null);
 
   const token = getToken();
-  const authBase = process.env.REACT_APP_AUTH_BASE || 'https://auth.whatsthecraic.run.place';
+  const authBase = AUTH_BASE;
 
   useEffect(() => {
     const load = async () => {
@@ -644,7 +644,10 @@ const Dashboard = () => {
       refreshSoundCloud();
     } catch (error) {
       console.error('SoundCloud connect failed:', error);
-      window.alert('Could not connect SoundCloud. Please check the profile URL/username and try again.');
+      const backendMessage = error?.response?.data?.error?.message || null;
+      window.alert(backendMessage
+        ? `Could not connect SoundCloud: ${backendMessage}`
+        : 'Could not connect SoundCloud. Please check the profile URL/username and try again.');
     }
   };
 
@@ -957,9 +960,15 @@ const Dashboard = () => {
           </div>
           <div style={{ flex: 1 }}>
             <h3 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.2rem' }}>Add SoundCloud taste</h3>
-            <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>Connect your SoundCloud profile (username or URL) to improve picks and artist matching.</p>
+            <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>
+              {soundcloudStatus?.configured === false
+                ? 'SoundCloud integration is temporarily unavailable. Add SOUNDCLOUD_CLIENT_ID and SOUNDCLOUD_CLIENT_SECRET in runtime secrets.'
+                : 'Connect your SoundCloud profile (username or URL) to improve picks and artist matching.'}
+            </p>
           </div>
-          <button className="btn" onClick={handleConnectSoundCloud}>Connect SoundCloud</button>
+          <button className="btn" onClick={handleConnectSoundCloud}>
+            {soundcloudStatus?.configured === false ? 'Connect (basic mode)' : 'Connect SoundCloud'}
+          </button>
         </motion.section>
       )}
 
@@ -1019,7 +1028,12 @@ const Dashboard = () => {
                   <h3 style={{ fontWeight: 700, fontSize: '0.92rem' }} className="line-clamp-1">{artist.name}</h3>
                   <span className="chip" style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>mixcloud</span>
                 </div>
-                <MixcloudPlayer mixcloudUrl={artist.latestMixcloudUrl || artist.mixcloudUrl} artistName={artist.name} height={90} />
+                <MixcloudPlayer
+                  mixcloudUrl={artist.latestMixcloudUrl || artist.mixcloudUrl}
+                  artistName={artist.name}
+                  height={150}
+                  allowLookup={false}
+                />
               </motion.div>
             ))}
           </div>

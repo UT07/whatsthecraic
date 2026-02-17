@@ -323,6 +323,41 @@ const normalizeSoundcloudProfileInput = (value) => {
   return input.replace(/^@/, '');
 };
 
+const buildSoundcloudFallbackProfile = (profileInput) => {
+  const normalizedInput = normalizeSoundcloudProfileInput(profileInput);
+  if (!normalizedInput) {
+    const error = new Error('SoundCloud profile URL or username is required');
+    error.status = 400;
+    throw error;
+  }
+
+  let username = normalizedInput.replace(/^@/, '');
+  let permalinkUrl = null;
+
+  if (normalizedInput.startsWith('http://') || normalizedInput.startsWith('https://')) {
+    try {
+      const parsed = new URL(normalizedInput);
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      username = parts[0] || username;
+      permalinkUrl = `https://soundcloud.com/${username}`;
+    } catch {
+      permalinkUrl = normalizedInput;
+    }
+  } else {
+    permalinkUrl = `https://soundcloud.com/${username}`;
+  }
+
+  const fallbackName = normalizeSoundcloudToken(username);
+  return {
+    username,
+    permalink_url: permalinkUrl,
+    avatar_url: null,
+    top_artists: fallbackName ? [{ name: fallbackName, count: 1 }] : [],
+    top_genres: [],
+    degraded: true
+  };
+};
+
 const fetchSoundcloudJson = async (url) => {
   if (!soundcloudConfigured()) {
     const error = new Error('SoundCloud is not configured');
@@ -519,16 +554,53 @@ const parseJsonField = (value, fallback = []) => {
 };
 
 const syncSoundcloudProfile = async (userId, profileInput = null) => {
+  const normalizedInput = normalizeSoundcloudProfileInput(profileInput);
   if (!soundcloudConfigured()) {
-    const error = new Error('SoundCloud is not configured');
-    error.status = 500;
-    throw error;
+    if (!normalizedInput) {
+      const error = new Error('SoundCloud is not configured');
+      error.status = 500;
+      throw error;
+    }
+    const fallbackProfile = buildSoundcloudFallbackProfile(normalizedInput);
+    await upsertSoundcloudProfile({
+      userId,
+      soundcloudUserId: null,
+      username: fallbackProfile.username,
+      permalinkUrl: fallbackProfile.permalink_url,
+      avatarUrl: fallbackProfile.avatar_url,
+      topArtists: fallbackProfile.top_artists,
+      topGenres: fallbackProfile.top_genres
+    });
+    return {
+      synced: true,
+      ...fallbackProfile
+    };
   }
 
   let user = null;
-  const normalizedInput = normalizeSoundcloudProfileInput(profileInput);
   if (normalizedInput) {
-    user = await resolveSoundcloudUser(normalizedInput);
+    try {
+      user = await resolveSoundcloudUser(normalizedInput);
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      if ([401, 403, 404, 429].includes(status)) {
+        const fallbackProfile = buildSoundcloudFallbackProfile(normalizedInput);
+        await upsertSoundcloudProfile({
+          userId,
+          soundcloudUserId: null,
+          username: fallbackProfile.username,
+          permalinkUrl: fallbackProfile.permalink_url,
+          avatarUrl: fallbackProfile.avatar_url,
+          topArtists: fallbackProfile.top_artists,
+          topGenres: fallbackProfile.top_genres
+        });
+        return {
+          synced: true,
+          ...fallbackProfile
+        };
+      }
+      throw err;
+    }
   } else {
     const existing = await getSoundcloudProfile(userId);
     if (!existing) {
@@ -987,6 +1059,7 @@ app.get('/auth/spotify/profile', requireAuth, asyncHandler(async (req, res) => {
 app.get('/auth/soundcloud/status', requireAuth, asyncHandler(async (req, res) => {
   const row = await getSoundcloudProfile(req.user.user_id);
   return res.json({
+    configured: soundcloudConfigured(),
     linked: Boolean(row),
     username: row?.username || null,
     permalink_url: row?.permalink_url || null,

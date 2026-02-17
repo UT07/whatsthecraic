@@ -56,10 +56,18 @@ const resolveLatestCloudcastUrl = async (artistName) => {
  * @param {string} mixcloudUrl - Direct Mixcloud URL (e.g., https://www.mixcloud.com/artist/show-name/)
  * @param {string} artistName - Artist name to search for recent mixes (if no URL provided)
  * @param {boolean} autoplay - Enable autoplay (default: false)
+ * @param {boolean} allowLookup - Allow client-side Mixcloud API lookups (default: false)
  * @param {number} width - Player width (default: 100%)
  * @param {number} height - Player height (default: 120)
  */
-const MixcloudPlayer = ({ mixcloudUrl, artistName, autoplay = false, width = '100%', height = 120 }) => {
+const MixcloudPlayer = ({
+  mixcloudUrl,
+  artistName,
+  autoplay = false,
+  allowLookup = false,
+  width = '100%',
+  height = 150
+}) => {
   const [iframeSrc, setIframeSrc] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -70,7 +78,7 @@ const MixcloudPlayer = ({ mixcloudUrl, artistName, autoplay = false, width = '10
       setError(null);
 
       try {
-        const cacheKey = `${mixcloudUrl || ''}|${artistName || ''}|${autoplay ? '1' : '0'}`;
+        const cacheKey = `${mixcloudUrl || ''}|${artistName || ''}|${autoplay ? '1' : '0'}|${allowLookup ? '1' : '0'}`;
         const cached = embedCache.get(cacheKey);
         if (cached) {
           setIframeSrc(cached);
@@ -81,7 +89,7 @@ const MixcloudPlayer = ({ mixcloudUrl, artistName, autoplay = false, width = '10
         let url = mixcloudUrl;
 
         // If URL is absent or points to profile only, resolve to latest cloudcast.
-        if ((!url || isProfileFeed(url)) && artistName) {
+        if ((!url || isProfileFeed(url)) && artistName && allowLookup) {
           const latest = await resolveLatestCloudcastUrl(artistName).catch(() => null);
           if (latest) {
             url = latest;
@@ -98,8 +106,8 @@ const MixcloudPlayer = ({ mixcloudUrl, artistName, autoplay = false, width = '10
         // Format: https://www.mixcloud.com/widget/iframe/?feed=<encoded_url>
         const widgetUrl = new URL('https://www.mixcloud.com/widget/iframe/');
         widgetUrl.searchParams.set('feed', normalizeFeedValue(url) || url);
-        widgetUrl.searchParams.set('hide_cover', '1');
-        widgetUrl.searchParams.set('light', '1');
+        widgetUrl.searchParams.set('hide_cover', '0');
+        widgetUrl.searchParams.set('light', '0');
 
         if (autoplay) {
           widgetUrl.searchParams.set('autoplay', '1');
@@ -122,7 +130,7 @@ const MixcloudPlayer = ({ mixcloudUrl, artistName, autoplay = false, width = '10
       setLoading(false);
       setError('No Mixcloud URL or artist name provided');
     }
-  }, [mixcloudUrl, artistName, autoplay]);
+  }, [mixcloudUrl, artistName, autoplay, allowLookup]);
 
   if (loading) {
     return (
