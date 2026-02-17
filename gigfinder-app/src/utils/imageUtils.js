@@ -203,13 +203,88 @@ export const fetchSpotifyArtistImage = async (artistName) => {
       const data = await response.json();
       const imageUrl = data.performers?.[0]?.image || null;
 
-    if (imageUrl) {
-      imageCacheStrategy(cacheKey, imageUrl);
-    }
+      if (imageUrl) {
+        imageCacheStrategy(cacheKey, imageUrl);
+      }
 
       return imageUrl;
     } catch (error) {
       console.warn('Failed to fetch Spotify image for:', artistName, error);
+      return null;
+    }
+  });
+};
+
+const tokenizeArtistName = (value) => (value || '')
+  .toString()
+  .toLowerCase()
+  .replace(/[^a-z0-9\s]/g, ' ')
+  .split(/\s+/)
+  .map((token) => token.trim())
+  .filter((token) => token.length >= 2);
+
+const scoreArtistNameMatch = (targetName, candidateName) => {
+  const target = (targetName || '').toString().toLowerCase().trim();
+  const candidate = (candidateName || '').toString().toLowerCase().trim();
+  if (!target || !candidate) return 0;
+  if (candidate === target) return 100;
+  if (candidate.startsWith(target) || target.startsWith(candidate)) return 80;
+
+  const targetTokens = tokenizeArtistName(target);
+  const candidateTokens = tokenizeArtistName(candidate);
+  if (targetTokens.length === 0 || candidateTokens.length === 0) return 0;
+
+  const overlap = targetTokens.filter((token) => candidateTokens.includes(token)).length;
+  if (overlap === 0) return 0;
+
+  return Math.round((overlap / targetTokens.length) * 60);
+};
+
+const isLikelyPlaceholderImage = (url) => {
+  const token = (url || '').toString().toLowerCase();
+  if (!token) return true;
+  return token.includes('default_avatar') || token.includes('default_user');
+};
+
+/**
+ * Fetch artist image from SoundCloud via backend /v1/performers
+ * @param {string} artistName - Name of the artist
+ * @returns {Promise<string|null>} Image URL or null
+ */
+export const fetchSoundCloudArtistImage = async (artistName) => {
+  if (!artistName || typeof artistName !== 'string') return null;
+
+  const cacheKey = `img_soundcloud_${artistName.toLowerCase().trim()}`;
+  const cached = imageCacheStrategy(cacheKey);
+  if (cached) return cached;
+
+  return requestQueue.add(async () => {
+    try {
+      const response = await fetch(
+        `${process.env.REACT_APP_API_BASE || 'https://api.whatsthecraic.run.place'}/v1/performers?q=${encodeURIComponent(artistName)}&include=soundcloud&limit=5`
+      );
+
+      if (!response.ok) return null;
+
+      const data = await response.json();
+      const performers = Array.isArray(data.performers) ? data.performers : [];
+      const best = performers
+        .map((performer) => ({
+          performer,
+          score: scoreArtistNameMatch(artistName, performer?.name),
+          hasImage: performer?.image && !isLikelyPlaceholderImage(performer.image)
+        }))
+        .filter((row) => row.hasImage)
+        .sort((a, b) => b.score - a.score)[0];
+      const imageUrl = best?.score >= 20 ? best.performer?.image : null;
+
+      if (imageUrl) {
+        imageCacheStrategy(cacheKey, imageUrl);
+      }
+
+      return imageUrl;
+    } catch (error) {
+      console.warn('Failed to fetch SoundCloud image for:', artistName, error);
       return null;
     }
   });
@@ -258,13 +333,16 @@ export const fetchMixcloudArtistImage = async (artistName) => {
 export const fetchArtistImage = async (artistName) => {
   if (!artistName) return null;
 
-  // HOTFIX: Spotify disabled due to 429 rate limiting on production backend
-  // Try Spotify first (usually better quality)
-  // let imageUrl = await fetchSpotifyArtistImage(artistName);
-  // if (imageUrl) return imageUrl;
+  // Prefer SoundCloud first for broader artist coverage.
+  let imageUrl = await fetchSoundCloudArtistImage(artistName);
+  if (imageUrl) return imageUrl;
+
+  // Then Spotify (quality fallback).
+  imageUrl = await fetchSpotifyArtistImage(artistName);
+  if (imageUrl) return imageUrl;
 
   // Use Mixcloud (no rate limits)
-  let imageUrl = await fetchMixcloudArtistImage(artistName);
+  imageUrl = await fetchMixcloudArtistImage(artistName);
   if (imageUrl) return imageUrl;
 
   return null;

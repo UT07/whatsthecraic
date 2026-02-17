@@ -37,6 +37,77 @@ const toMatchPercent = (score) => Math.round(normalizeMatchScore(score) * 100);
 
 const GENRE_FILTERS = ['All', 'Electronic', 'Techno', 'House', 'Trad', 'Rock', 'Hip-Hop', 'Jazz', 'Pop', 'Folk', 'Comedy'];
 
+const DEFAULT_TASTE_QUERY = 'live dj set electronic house techno club';
+
+const normalizeTasteToken = (value) => (value || '')
+  .toString()
+  .toLowerCase()
+  .trim();
+
+const uniqueTokens = (items, limit = 8) => {
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const token = normalizeTasteToken(item);
+    if (!token || seen.has(token)) return;
+    seen.add(token);
+    out.push(token);
+  });
+  return out.slice(0, limit);
+};
+
+const getTopArtistsFromProfile = (profile, limit = 3) => uniqueTokens(
+  (profile?.top_artists || []).map((item) => (typeof item === 'string' ? item : item?.name || item)),
+  limit
+);
+
+const getTopGenresFromProfile = (profile, limit = 5) => uniqueTokens(
+  (profile?.top_genres || []).map((item) => (typeof item === 'string' ? item : item?.genre || item)),
+  limit
+);
+
+const buildTasteQuery = (profile) => {
+  const artists = getTopArtistsFromProfile(profile, 2);
+  const genres = getTopGenresFromProfile(profile, 4);
+  const tokens = [...artists, ...genres];
+  return tokens.length > 0 ? tokens.join(' ') : DEFAULT_TASTE_QUERY;
+};
+
+const extractGenreTokens = (genres) => {
+  if (Array.isArray(genres)) {
+    return genres
+      .map((genre) => normalizeTasteToken(genre))
+      .filter(Boolean);
+  }
+  if (typeof genres === 'string') {
+    return genres
+      .split(/[,/|]+/)
+      .map((genre) => normalizeTasteToken(genre))
+      .filter(Boolean);
+  }
+  return [];
+};
+
+const buildMlContextFromTaste = (profile, soundcloudPerformers = []) => {
+  const spotifyArtists = getTopArtistsFromProfile(profile, 8);
+  const spotifyGenres = getTopGenresFromProfile(profile, 8);
+  const soundcloudArtists = uniqueTokens(
+    (soundcloudPerformers || []).map((performer) => performer?.name),
+    8
+  );
+  const soundcloudGenres = uniqueTokens(
+    (soundcloudPerformers || []).flatMap((performer) => extractGenreTokens(performer?.genres)),
+    10
+  );
+
+  return {
+    spotify_artists: spotifyArtists,
+    spotify_genres: spotifyGenres,
+    soundcloud_artists: soundcloudArtists,
+    soundcloud_genres: soundcloudGenres
+  };
+};
+
 /* ─── MATCH REASON BADGE ─── */
 const MatchBadge = ({ reasons, score }) => {
   if (!reasons && !score) return null;
@@ -361,31 +432,17 @@ const Dashboard = () => {
         const requests = [
           eventsAPI.searchEvents({ limit: 200 }),
           djAPI.getAllDJs(),
-          venueAPI.getAllVenues(),
-          eventsAPI.getPerformers({ include: 'mixcloud', city: 'Dublin', limit: 12 })
+          venueAPI.getAllVenues()
         ];
         if (token) {
           requests.push(eventsAPI.getFeed({ limit: 20 }));
-          // Get ML recommendations (collaborative filtering)
-          requests.push(mlAPI.getRecommendations({ limit: 12 }));
         }
 
         const results = await Promise.all(requests);
         setEvents(results[0].events || []);
         setDjs(Array.isArray(results[1]) ? results[1] : []);
         setVenues(Array.isArray(results[2]) ? results[2] : []);
-        const mixcloudList = Array.isArray(results[3]?.performers) ? results[3].performers : [];
-        const seenArtists = new Set();
-        setMixcloudArtists(mixcloudList.filter((artist) => {
-          const key = (artist?.name || '').toLowerCase().trim();
-          if (!key || seenArtists.has(key)) return false;
-          seenArtists.add(key);
-          return true;
-        }));
-        if (results[4]) setFeedEvents(results[4].events || []);
-        if (results[5]?.recommendations) {
-          setMlRecommendations(results[5].recommendations);
-        }
+        if (results[3]) setFeedEvents(results[3].events || []);
       } catch (error) {
         console.error('Dashboard load error:', error);
       } finally {
@@ -404,6 +461,84 @@ const Dashboard = () => {
       .then(setSpotifyProfile)
       .catch(() => setSpotifyProfile(null));
   }, [token]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const dedupeByName = (artists) => {
+      const seen = new Set();
+      return (Array.isArray(artists) ? artists : []).filter((artist) => {
+        const key = normalizeTasteToken(artist?.name);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+
+    const loadTasteDrivenData = async () => {
+      const tasteQuery = buildTasteQuery(spotifyProfile);
+
+      try {
+        let mixcloudPerformers = [];
+        const mixcloudData = await eventsAPI.getPerformers({
+          include: 'mixcloud',
+          q: tasteQuery,
+          limit: 18
+        });
+        mixcloudPerformers = Array.isArray(mixcloudData?.performers) ? mixcloudData.performers : [];
+
+        if (mixcloudPerformers.length === 0 && tasteQuery !== DEFAULT_TASTE_QUERY) {
+          const fallbackMixcloud = await eventsAPI.getPerformers({
+            include: 'mixcloud',
+            q: DEFAULT_TASTE_QUERY,
+            limit: 18
+          });
+          mixcloudPerformers = Array.isArray(fallbackMixcloud?.performers) ? fallbackMixcloud.performers : [];
+        }
+
+        if (!cancelled) {
+          setMixcloudArtists(dedupeByName(mixcloudPerformers));
+        }
+      } catch (error) {
+        console.error('Mixcloud load error:', error);
+        if (!cancelled) {
+          setMixcloudArtists([]);
+        }
+      }
+
+      if (!token) {
+        return;
+      }
+
+      try {
+        const soundcloudData = await eventsAPI.getPerformers({
+          include: 'soundcloud',
+          q: tasteQuery,
+          limit: 30
+        });
+        const soundcloudPerformers = Array.isArray(soundcloudData?.performers) ? soundcloudData.performers : [];
+        const context = buildMlContextFromTaste(spotifyProfile, soundcloudPerformers);
+        const recommendationData = await mlAPI.getRecommendations({
+          limit: 12,
+          context
+        });
+        if (!cancelled) {
+          setMlRecommendations(recommendationData?.recommendations || []);
+        }
+      } catch (error) {
+        console.error('ML recommendations load error:', error);
+        if (!cancelled) {
+          setMlRecommendations([]);
+        }
+      }
+    };
+
+    loadTasteDrivenData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, spotifyProfile]);
 
   const handleSave = async (id) => {
     try {

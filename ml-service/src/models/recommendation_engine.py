@@ -8,7 +8,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler
 from scipy.sparse import csr_matrix
@@ -291,7 +291,8 @@ class RecommendationEngine:
         try:
             if not self.is_model_loaded or self.model is None:
                 logger.warning("Model not loaded, returning fallback recommendations")
-                return self._get_fallback_recommendations(user_id, city, limit)
+                fallback = self._get_fallback_recommendations(user_id, city, limit)
+                return self._apply_context_boost(fallback, context)
 
             # Select algorithm based on A/B test variant
             if variant == 'collaborative_filtering':
@@ -304,11 +305,110 @@ class RecommendationEngine:
                 # Control: simple popularity-based
                 recommendations = self._popularity_recommendations(city, limit)
 
+            recommendations = self._apply_context_boost(recommendations, context)
             return recommendations
 
         except Exception as e:
             logger.error(f"Error generating recommendations: {e}")
-            return self._get_fallback_recommendations(user_id, city, limit)
+            fallback = self._get_fallback_recommendations(user_id, city, limit)
+            return self._apply_context_boost(fallback, context)
+
+    def _normalize_token(self, value: Any) -> str:
+        return str(value or '').lower().strip()
+
+    def _tokenize(self, value: Any) -> List[str]:
+        if value is None:
+            return []
+
+        if isinstance(value, list):
+            tokens: List[str] = []
+            for item in value:
+                tokens.extend(self._tokenize(item))
+            return tokens
+
+        if isinstance(value, dict):
+            # Support context shapes like {name: "..."} or {genre: "..."}.
+            if 'name' in value:
+                return self._tokenize(value.get('name'))
+            if 'genre' in value:
+                return self._tokenize(value.get('genre'))
+            return []
+
+        text = self._normalize_token(value)
+        if not text:
+            return []
+
+        text = text.replace('|', ',').replace('/', ',').replace(';', ',')
+        return [part.strip() for part in text.split(',') if part.strip()]
+
+    def _extract_context_tokens(self, context: Optional[Dict[str, Any]]) -> tuple[Set[str], Set[str]]:
+        if not context or not isinstance(context, dict):
+            return set(), set()
+
+        genre_keys = ['spotify_genres', 'soundcloud_genres', 'preferred_genres', 'top_genres']
+        artist_keys = ['spotify_artists', 'soundcloud_artists', 'preferred_artists', 'top_artists']
+
+        genre_tokens: Set[str] = set()
+        for key in genre_keys:
+            for token in self._tokenize(context.get(key)):
+                if token:
+                    genre_tokens.add(token)
+
+        artist_tokens: Set[str] = set()
+        for key in artist_keys:
+            for token in self._tokenize(context.get(key)):
+                if token:
+                    artist_tokens.add(token)
+
+        return genre_tokens, artist_tokens
+
+    def _apply_context_boost(
+        self,
+        recommendations: List[Dict[str, Any]],
+        context: Optional[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        if not recommendations:
+            return recommendations
+
+        genre_tokens, artist_tokens = self._extract_context_tokens(context)
+        if not genre_tokens and not artist_tokens:
+            return recommendations
+
+        boosted: List[Dict[str, Any]] = []
+        for recommendation in recommendations:
+            row = dict(recommendation)
+            base_score = float(row.get('score') or 0.0)
+            reasons = row.get('context_reasons', [])
+            if not isinstance(reasons, list):
+                reasons = []
+
+            title_blob = self._normalize_token(
+                f"{row.get('title', '')} {row.get('artist_name', '')}"
+            )
+            rec_genres = set(self._tokenize(row.get('genre') or row.get('genres')))
+            genre_match_count = 0
+            for token in genre_tokens:
+                if any(token in genre or genre in token for genre in rec_genres):
+                    genre_match_count += 1
+            if genre_match_count > 0:
+                base_score += min(genre_match_count, 3) * 0.15
+                reasons.append('taste_genre_match')
+
+            artist_match_count = 0
+            for token in artist_tokens:
+                if token and token in title_blob:
+                    artist_match_count += 1
+            if artist_match_count > 0:
+                base_score += min(artist_match_count, 2) * 0.25
+                reasons.append('taste_artist_match')
+
+            row['score'] = float(round(base_score, 4))
+            if reasons:
+                row['context_reasons'] = list(dict.fromkeys(reasons))
+            boosted.append(row)
+
+        boosted.sort(key=lambda item: float(item.get('score') or 0.0), reverse=True)
+        return boosted
 
     def _collaborative_filtering_recommendations(
         self,

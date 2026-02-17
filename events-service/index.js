@@ -17,6 +17,7 @@ const {
 const rateLimit = require('express-rate-limit');
 const spotifyClient = require('./spotify-client');
 const mixcloudClient = require('./mixcloud-client');
+const soundcloudClient = require('./soundcloud-client');
 
 // Adjust these env vars / defaults as needed
 const DB_HOST = process.env.DB_HOST || 'db';
@@ -55,6 +56,9 @@ const BANDSINTOWN_USER_MAX_ARTISTS = Number.parseInt(process.env.BANDSINTOWN_USE
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || null;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || null;
 const MIXCLOUD_ENABLED = (process.env.MIXCLOUD_ENABLED || 'true') === 'true';
+const SOUNDCLOUD_CLIENT_ID = process.env.SOUNDCLOUD_CLIENT_ID || null;
+const SOUNDCLOUD_CLIENT_SECRET = process.env.SOUNDCLOUD_CLIENT_SECRET || null;
+const SOUNDCLOUD_ENABLED = (process.env.SOUNDCLOUD_ENABLED || 'true') === 'true';
 
 const warnOnMissingEnv = () => {
   const missing = [];
@@ -68,6 +72,7 @@ const warnOnMissingEnv = () => {
   if (INGESTION_ENABLED && !EVENTBRITE_API_TOKEN) warnings.push('INGESTION_ENABLED without EVENTBRITE_API_TOKEN');
   if (DICE_APIFY_ENABLED && !APIFY_TOKEN) warnings.push('DICE_APIFY_ENABLED without APIFY_TOKEN');
   if (BANDSINTOWN_APP_ID === null) warnings.push('BANDSINTOWN_APP_ID not set');
+  if (SOUNDCLOUD_ENABLED && !SOUNDCLOUD_CLIENT_ID) warnings.push('SOUNDCLOUD_ENABLED without SOUNDCLOUD_CLIENT_ID');
 
   const messages = [];
   if (missing.length) messages.push(`Missing required env: ${missing.join(', ')}`);
@@ -737,6 +742,111 @@ const normalizeTokenList = (value) => {
   return [];
 };
 
+const extractNameList = (items) => {
+  if (!Array.isArray(items)) return [];
+  return dedupeList(
+    items
+      .map((item) => {
+        if (typeof item === 'string') return item.trim();
+        if (item && typeof item === 'object') return (item.name || item.artist || '').toString().trim();
+        return '';
+      })
+      .filter(Boolean)
+  );
+};
+
+const buildPerformerSearchQuery = (signals, fallback = 'live dj set electronic house techno') => {
+  const artists = dedupeList([
+    ...(signals?.preferredArtists || []),
+    ...(signals?.spotifyArtists || []),
+    ...(signals?.soundcloudArtists || [])
+  ]).slice(0, 2);
+
+  const genres = dedupeList([
+    ...(signals?.preferredGenres || []),
+    ...(signals?.spotifyGenres || []),
+    ...(signals?.soundcloudGenres || [])
+  ]).slice(0, 4);
+
+  const tokens = [...artists, ...genres]
+    .map(normalizeToken)
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return fallback;
+  }
+
+  return tokens.join(' ');
+};
+
+const tokenizeSearchQuery = (value) => {
+  if (!value) return [];
+  return dedupeList(
+    value
+      .toString()
+      .split(/\s+/)
+      .map(normalizeToken)
+      .filter(token => token.length >= 2)
+  );
+};
+
+const SOUNDCLOUD_SIGNAL_CACHE_TTL_MS = Number.parseInt(process.env.SOUNDCLOUD_SIGNAL_TTL_MS || '21600000', 10);
+const soundcloudSignalCache = new Map();
+
+const getSoundcloudTasteSignals = async (artistNames) => {
+  if (!SOUNDCLOUD_ENABLED || !SOUNDCLOUD_CLIENT_ID) {
+    return { soundcloudArtists: [], soundcloudGenres: [] };
+  }
+
+  const seeds = dedupeList((artistNames || []).map(item => (item || '').toString().trim()).filter(Boolean)).slice(0, 8);
+  if (seeds.length === 0) {
+    return { soundcloudArtists: [], soundcloudGenres: [] };
+  }
+
+  const cacheKey = seeds.map(normalizeToken).sort().join('|');
+  const cached = soundcloudSignalCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const artistTokens = new Set();
+  const genreTokens = new Set();
+
+  for (const seed of seeds) {
+    try {
+      const users = await soundcloudClient.searchUsers(SOUNDCLOUD_CLIENT_ID, seed, 3);
+      if (!Array.isArray(users) || users.length === 0) continue;
+
+      const seedToken = normalizeToken(seed);
+      const best = users.find((user) => {
+        const nameToken = normalizeToken(user?.name);
+        return nameToken && (nameToken.includes(seedToken) || seedToken.includes(nameToken));
+      }) || users[0];
+
+      const nameToken = normalizeToken(best?.name);
+      if (nameToken) artistTokens.add(nameToken);
+
+      normalizeTokenList(best?.genres).forEach((token) => {
+        if (token) genreTokens.add(token);
+      });
+    } catch (err) {
+      console.warn('[signals] SoundCloud enrichment failed:', err.message);
+    }
+  }
+
+  const value = {
+    soundcloudArtists: Array.from(artistTokens),
+    soundcloudGenres: Array.from(genreTokens)
+  };
+
+  soundcloudSignalCache.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + SOUNDCLOUD_SIGNAL_CACHE_TTL_MS
+  });
+
+  return value;
+};
+
 const getTokenFromRequest = (req) => {
   const authHeader = req.headers.authorization || '';
   if (authHeader.startsWith('Bearer ')) {
@@ -898,6 +1008,7 @@ const getUserSignals = async (userId) => {
   const prefRow = prefRows.length ? prefRows[0] : {};
   const preferredGenres = parseJson(prefRow.preferred_genres);
   const preferredArtists = parseJson(prefRow.preferred_artists);
+  const preferredArtistNames = extractNameList(preferredArtists);
   const preferredCities = parseJson(prefRow.preferred_cities);
   const preferredVenues = parseJson(prefRow.preferred_venues);
   const preferredDjs = parseJson(prefRow.preferred_djs);
@@ -910,14 +1021,17 @@ const getUserSignals = async (userId) => {
   const nightPreferences = parseJson(prefRow.night_preferences);
   const spotifyGenresRaw = spotifyRows.length ? parseJson(spotifyRows[0].top_genres) : [];
   const spotifyArtistsRaw = spotifyRows.length ? parseJson(spotifyRows[0].top_artists) : [];
+  const spotifyArtistNames = extractNameList(spotifyArtistsRaw);
   const spotifyGenres = Array.isArray(spotifyGenresRaw)
     ? spotifyGenresRaw.map(item => normalizeToken(item.genre || item)).filter(Boolean)
     : [];
-  const spotifyArtists = Array.isArray(spotifyArtistsRaw)
-    ? spotifyArtistsRaw
-      .map(item => normalizeToken(item.name || item))
-      .filter(Boolean)
-    : [];
+  const spotifyArtists = spotifyArtistNames
+    .map(item => normalizeToken(item))
+    .filter(Boolean);
+  const soundcloudSignals = await getSoundcloudTasteSignals([
+    ...spotifyArtistNames,
+    ...preferredArtistNames
+  ]);
 
   const [savedRows] = await pool.query(
     `SELECT e.id, e.genres, e.city, e.venue_name, e.title
@@ -955,7 +1069,7 @@ const getUserSignals = async (userId) => {
 
   return {
     preferredGenres: preferredGenres.map(normalizeToken).filter(Boolean),
-    preferredArtists: preferredArtists.map(normalizeToken).filter(Boolean),
+    preferredArtists: preferredArtistNames.map(normalizeToken).filter(Boolean),
     preferredCities: preferredCities.map(normalizeToken).filter(Boolean),
     preferredVenues: preferredVenues.map(normalizeToken).filter(Boolean),
     preferredDjs: preferredDjs.map(normalizeToken).filter(Boolean),
@@ -964,6 +1078,8 @@ const getUserSignals = async (userId) => {
     nightPreferences: nightPreferences.map(normalizeToken).filter(Boolean),
     spotifyGenres,
     spotifyArtists,
+    soundcloudGenres: soundcloudSignals.soundcloudGenres || [],
+    soundcloudArtists: soundcloudSignals.soundcloudArtists || [],
     savedGenres: Array.from(savedGenres),
     savedCities: Array.from(savedCities),
     savedVenues: Array.from(savedVenues),
@@ -1050,6 +1166,12 @@ const scoreEventRow = (row, signals) => {
     reasons.push({ type: 'spotify_genre', values: spotifyGenreMatches.slice(0, 3) });
   }
 
+  const soundcloudGenreMatches = expandedEventGenres.filter(g => (signals.soundcloudGenres || []).includes(g));
+  if (soundcloudGenreMatches.length > 0) {
+    score += Math.min(soundcloudGenreMatches.length, 4) * 2;
+    reasons.push({ type: 'soundcloud_genre', values: soundcloudGenreMatches.slice(0, 3) });
+  }
+
   const artistMatches = signals.preferredArtists.filter(artist =>
     artist && (title.includes(artist) || description.includes(artist))
   );
@@ -1064,6 +1186,14 @@ const scoreEventRow = (row, signals) => {
   if (spotifyArtistMatches.length > 0) {
     score += spotifyArtistMatches.length * 4;
     reasons.push({ type: 'spotify_artist', values: spotifyArtistMatches.slice(0, 3) });
+  }
+
+  const soundcloudArtistMatches = (signals.soundcloudArtists || []).filter(artist =>
+    artist && (title.includes(artist) || description.includes(artist))
+  );
+  if (soundcloudArtistMatches.length > 0) {
+    score += soundcloudArtistMatches.length * 3;
+    reasons.push({ type: 'soundcloud_artist', values: soundcloudArtistMatches.slice(0, 3) });
   }
 
   const venueName = normalizeToken(row.venue_name);
@@ -1170,9 +1300,11 @@ const normalizeRankScore = (rawScore) => {
 const RANK_REASON_MAP = {
   preferred_genre: 'genre_match',
   spotify_genre: 'genre_match',
+  soundcloud_genre: 'genre_match',
   saved_genre: 'genre_match',
   preferred_artist: 'artist_match',
   spotify_artist: 'artist_match',
+  soundcloud_artist: 'artist_match',
   preferred_dj: 'artist_match',
   saved_title: 'artist_match',
   preferred_venue: 'venue_match',
@@ -1250,8 +1382,16 @@ const scorePerformer = (performer, signals, keyword = '') => {
 
   const performerName = normalizeToken(performer.name);
   const performerGenres = expandGenres(parseGenreTokens(performer.genre_tokens || performer.genres));
-  const preferredGenres = new Set([...(signals.preferredGenres || []), ...(signals.spotifyGenres || [])].filter(Boolean));
-  const preferredArtists = dedupeList([...(signals.preferredArtists || []), ...(signals.spotifyArtists || [])].filter(Boolean));
+  const preferredGenres = new Set([
+    ...(signals.preferredGenres || []),
+    ...(signals.spotifyGenres || []),
+    ...(signals.soundcloudGenres || [])
+  ].filter(Boolean));
+  const preferredArtists = dedupeList([
+    ...(signals.preferredArtists || []),
+    ...(signals.spotifyArtists || []),
+    ...(signals.soundcloudArtists || [])
+  ].filter(Boolean));
 
   const artistMatches = preferredArtists.filter(artist =>
     artist && (performerName.includes(artist) || artist.includes(performerName))
@@ -1273,7 +1413,8 @@ const scorePerformer = (performer, signals, keyword = '') => {
     reasons.push('city_match');
   }
 
-  if (keyword && performerName.includes(keyword)) {
+  const keywordTokens = tokenizeSearchQuery(keyword);
+  if (keywordTokens.some(token => performerName.includes(token) || performerGenres.some(genre => genre.includes(token)))) {
     raw += 1;
     reasons.push('keyword_match');
   }
@@ -1524,7 +1665,7 @@ app.get('/v1/performers', async (req, res) => {
   } = parsed.data;
 
   const includeSet = new Set(
-    (include ? include.split(',') : ['local', 'ticketmaster', 'spotify', 'mixcloud'])
+    (include ? include.split(',') : ['local', 'ticketmaster', 'spotify', 'mixcloud', 'soundcloud'])
       .map(item => normalizeToken(item))
       .filter(Boolean)
   );
@@ -1533,6 +1674,7 @@ app.get('/v1/performers', async (req, res) => {
   const toDate = parseDateParam(to, new Date(Date.now() + 90 * 24 * 60 * 60 * 1000));
   const limitValue = Math.min(Number.parseInt(limit || '200', 10) || 200, 500);
   const keyword = q ? normalizeToken(q) : '';
+  const keywordTokens = tokenizeSearchQuery(keyword);
   const cityToken = city ? normalizeToken(city) : '';
 
   let performerSignals = null;
@@ -1548,6 +1690,8 @@ app.get('/v1/performers', async (req, res) => {
       performerSignals = null;
     }
   }
+
+  const tasteQuery = keyword || buildPerformerSearchQuery(performerSignals, 'live dj set electronic house techno');
 
   const performers = [];
 
@@ -1658,7 +1802,7 @@ app.get('/v1/performers', async (req, res) => {
 
   if (includeSet.has('spotify') && SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET) {
     try {
-      const searchQuery = keyword || 'irish artist';
+      const searchQuery = tasteQuery || 'live artist set';
       const artists = await spotifyClient.searchArtists(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, searchQuery, 30);
       artists.forEach(a => {
         performers.push({
@@ -1677,10 +1821,56 @@ app.get('/v1/performers', async (req, res) => {
     }
   }
 
+  if (includeSet.has('soundcloud') && SOUNDCLOUD_ENABLED && SOUNDCLOUD_CLIENT_ID) {
+    try {
+      let users = await soundcloudClient.searchUsers(SOUNDCLOUD_CLIENT_ID, tasteQuery, 30);
+      if ((!Array.isArray(users) || users.length === 0) && keywordTokens.length > 1) {
+        const mergedUsers = new Map();
+        for (const token of keywordTokens.slice(0, 4)) {
+          const partial = await soundcloudClient.searchUsers(SOUNDCLOUD_CLIENT_ID, token, 8);
+          partial.forEach((user) => {
+            const userKey = normalizeToken(user?.username || user?.name);
+            if (!userKey || mergedUsers.has(userKey)) return;
+            mergedUsers.set(userKey, user);
+          });
+        }
+        users = Array.from(mergedUsers.values()).slice(0, 30);
+      }
+
+      users.forEach((user) => {
+        performers.push({
+          name: user.name,
+          source: 'soundcloud',
+          image: user.image || null,
+          genres: Array.isArray(user.genres) && user.genres.length > 0 ? user.genres.join(', ') : null,
+          popularity: Number(user.popularity || 0) || null,
+          followers: Number(user.followers || 0) || null,
+          soundcloud: user.soundcloudUrl || user.url || null,
+          username: user.username || null
+        });
+      });
+    } catch (err) {
+      console.warn('[performers] SoundCloud search failed:', err.message);
+    }
+  }
+
   if (includeSet.has('mixcloud') && MIXCLOUD_ENABLED) {
     try {
-      const searchQuery = keyword || 'dublin dj';
-      const djs = await mixcloudClient.searchDJs(searchQuery, 20);
+      const searchQuery = tasteQuery;
+      let djs = await mixcloudClient.searchDJs(searchQuery, 20);
+      if ((!Array.isArray(djs) || djs.length === 0) && keywordTokens.length > 1) {
+        const mergedDjs = new Map();
+        for (const token of keywordTokens.slice(0, 4)) {
+          const partial = await mixcloudClient.searchDJs(token, 8);
+          partial.forEach((dj) => {
+            const djKey = normalizeToken(dj?.username || dj?.name);
+            if (!djKey || mergedDjs.has(djKey)) return;
+            mergedDjs.set(djKey, dj);
+          });
+        }
+        djs = Array.from(mergedDjs.values()).slice(0, 20);
+      }
+
       for (const dj of djs) {
         let genres = null;
         try {
@@ -1711,10 +1901,14 @@ app.get('/v1/performers', async (req, res) => {
     const genreText = Array.isArray(item.genres)
       ? item.genres.join(' ')
       : (item.genres || '');
-    const matchesKeyword = !keyword
-      || key.includes(keyword)
-      || normalizeToken(genreText).includes(keyword);
-    const matchesCity = !cityToken || normalizeToken(item.city).includes(cityToken);
+    const searchableText = `${key} ${normalizeToken(genreText)}`.trim();
+    const matchesKeyword = keywordTokens.length === 0
+      || keywordTokens.some((token) => searchableText.includes(token));
+    const sourceToken = normalizeToken(item.source);
+    const isGlobalSource = sourceToken === 'mixcloud' || sourceToken === 'soundcloud' || sourceToken === 'spotify';
+    const matchesCity = !cityToken
+      || normalizeToken(item.city).includes(cityToken)
+      || isGlobalSource;
     if (!matchesKeyword || !matchesCity) return;
 
     if (!mergedByName.has(key)) {

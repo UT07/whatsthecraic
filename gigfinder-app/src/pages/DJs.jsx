@@ -120,7 +120,7 @@ const DJs = () => {
       const data = await eventsAPI.getPerformers({
         city: filters.city || undefined,
         q: filters.q || undefined,
-        include: 'ticketmaster,spotify,mixcloud',
+        include: 'ticketmaster,spotify,mixcloud,soundcloud',
         limit: 200
       });
       setPerformers(data.performers || []);
@@ -238,7 +238,12 @@ const DJs = () => {
     return Array.from(byName.values())
       .filter((artist) => {
         if (qToken && !normalizeToken(artist.name).includes(qToken)) return false;
-        if (cityToken && !normalizeToken(artist.city).includes(cityToken)) return false;
+        if (cityToken) {
+          const cityMatches = normalizeToken(artist.city).includes(cityToken);
+          const sourceSet = new Set((artist.sources || []).map((source) => normalizeToken(source)));
+          const isGlobalArtist = sourceSet.has('mixcloud') || sourceSet.has('soundcloud') || sourceSet.has('spotify');
+          if (!cityMatches && !isGlobalArtist) return false;
+        }
         if (genreToken) {
           const hasGenreMatch = (artist.genre_tokens || []).some(token => token.includes(genreToken));
           if (!hasGenreMatch) return false;
