@@ -812,7 +812,19 @@ const mergeSoundcloudTracks = (...trackLists) => {
 const syncSoundcloudProfile = async (userId, profileInput = null) => {
   const normalizedInput = normalizeSoundcloudProfileInput(profileInput);
   const existing = await getSoundcloudProfile(userId);
+  const buildDegradedFromExisting = (reason = 'soundcloud_sync_degraded', overrides = {}) => {
+    if (!existing) return null;
+    return {
+      ...serializeSoundcloudProfile(existing, overrides),
+      cached: true,
+      degraded: true,
+      reason
+    };
+  };
+
   if (!soundcloudConfigured()) {
+    const degraded = buildDegradedFromExisting('soundcloud_not_fully_configured');
+    if (degraded) return degraded;
     if (!normalizedInput) {
       const error = new Error('SoundCloud is not configured');
       error.status = 500;
@@ -856,11 +868,8 @@ const syncSoundcloudProfile = async (userId, profileInput = null) => {
       const status = Number(err?.status || 0);
       if ([401, 403, 404, 429].includes(status)) {
         if (existing && isSameSoundcloudProfile(existing, normalizedInput)) {
-          return {
-            ...serializeSoundcloudProfile(existing),
-            cached: true,
-            degraded: true
-          };
+          const degraded = buildDegradedFromExisting('soundcloud_profile_cached');
+          if (degraded) return degraded;
         }
         const fallbackProfile = buildSoundcloudFallbackProfile(normalizedInput);
         await upsertSoundcloudProfile({
@@ -877,6 +886,10 @@ const syncSoundcloudProfile = async (userId, profileInput = null) => {
           ...fallbackProfile
         };
       }
+      if (existing) {
+        const degraded = buildDegradedFromExisting('soundcloud_upstream_unavailable');
+        if (degraded) return degraded;
+      }
       throw err;
     }
   } else {
@@ -886,27 +899,16 @@ const syncSoundcloudProfile = async (userId, profileInput = null) => {
     try {
       user = await resolveSoundcloudUser(existing.permalink_url || existing.username);
     } catch (err) {
-      const status = Number(err?.status || 0);
-      if ([401, 403, 404, 429].includes(status)) {
-        return {
-          ...serializeSoundcloudProfile(existing),
-          cached: true,
-          degraded: true
-        };
-      }
+      const degraded = buildDegradedFromExisting('soundcloud_upstream_unavailable');
+      if (degraded) return degraded;
       throw err;
     }
   }
 
   const lookupId = getSoundcloudUserLookupId(user);
   if (!lookupId) {
-    if (existing) {
-      return {
-        ...serializeSoundcloudProfile(existing),
-        cached: true,
-        degraded: true
-      };
-    }
+    const degraded = buildDegradedFromExisting('soundcloud_lookup_missing');
+    if (degraded) return degraded;
     const error = new Error('Could not resolve SoundCloud user id');
     error.status = 502;
     throw error;
@@ -925,11 +927,8 @@ const syncSoundcloudProfile = async (userId, profileInput = null) => {
   const mergedTracks = mergeSoundcloudTracks(ownTracks, likedTracks);
 
   if (mergedTracks.length === 0 && existing) {
-    return {
-      ...serializeSoundcloudProfile(existing),
-      cached: true,
-      degraded: true
-    };
+    const degraded = buildDegradedFromExisting('soundcloud_tracks_unavailable');
+    if (degraded) return degraded;
   }
 
   const topGenres = computeSoundcloudTopGenres(mergedTracks);
