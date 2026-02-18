@@ -66,14 +66,25 @@ jobs:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          MAX_ATTEMPTS=180
+          SLEEP_SECONDS=10
+          DEPLOY_TIMEOUT_SECONDS=2400
+
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
-            --timeout-seconds 600 \
+            --timeout-seconds $DEPLOY_TIMEOUT_SECONDS \
             --parameters '{"commands":[
+              "set -euo pipefail",
               "echo \"Starting deployment at $(date)\"",
               "# Refresh ECR credentials",
               "/usr/local/bin/ecr-refresh.sh",
+              "# Refresh Kubernetes image pull secret (ECR tokens expire every 12h)",
+              "export AWS_REGION=eu-west-1",
+              "export ECR_URL=385017713886.dkr.ecr.eu-west-1.amazonaws.com",
+              "export ECR_TOKEN=$(aws ecr get-login-password --region $AWS_REGION)",
+              "kubectl create secret docker-registry ecr-registry -n whatsthecraic --docker-server=$ECR_URL --docker-username=AWS --docker-password=\"$ECR_TOKEN\" --dry-run=client -o yaml | kubectl apply -f -",
+              "kubectl patch serviceaccount whatsthecraic-sa -n whatsthecraic -p '{\"imagePullSecrets\":[{\"name\":\"ecr-registry\"}]}'",
               "sleep 5",
               "# Update image tags to specific commit SHA",
               "export IMAGE_TAG='"$IMAGE_TAG"'",
@@ -98,12 +109,12 @@ jobs:
             --query 'Command.CommandId' --output text)
 
           echo "Waiting for deployment to complete (command: $COMMAND_ID)..."
-          for i in $(seq 1 60); do
+          for i in $(seq 1 $MAX_ATTEMPTS); do
             STATUS=$(aws ssm get-command-invocation \
               --command-id $COMMAND_ID \
               --instance-id $INSTANCE_ID \
               --query 'Status' --output text 2>/dev/null || echo "Pending")
-            echo "Attempt $i/60: $STATUS"
+            echo "Attempt $i/$MAX_ATTEMPTS: $STATUS"
             if [ "$STATUS" = "Success" ]; then
               echo "Deployment completed successfully!"
               aws ssm get-command-invocation \
@@ -112,7 +123,7 @@ jobs:
                 --query 'StandardOutputContent' --output text 2>/dev/null || true
               break
             fi
-            if [ "$STATUS" = "Failed" ]; then
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "TimedOut" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "Cancelling" ]; then
               echo "Deployment failed!"
               aws ssm get-command-invocation \
                 --command-id $COMMAND_ID \
@@ -124,11 +135,23 @@ jobs:
                 --query 'StandardOutputContent' --output text 2>/dev/null || true
               exit 1
             fi
-            sleep 10
+            sleep $SLEEP_SECONDS
           done
 
           if [ "$STATUS" != "Success" ]; then
-            echo "Deployment timed out after 10 minutes"
+            echo "Deployment timed out after $((MAX_ATTEMPTS * SLEEP_SECONDS / 60)) minutes"
+            aws ssm get-command-invocation \
+              --command-id $COMMAND_ID \
+              --instance-id $INSTANCE_ID \
+              --query 'StatusDetails' --output text 2>/dev/null || true
+            aws ssm get-command-invocation \
+              --command-id $COMMAND_ID \
+              --instance-id $INSTANCE_ID \
+              --query 'StandardErrorContent' --output text 2>/dev/null || true
+            aws ssm get-command-invocation \
+              --command-id $COMMAND_ID \
+              --instance-id $INSTANCE_ID \
+              --query 'StandardOutputContent' --output text 2>/dev/null || true
             exit 1
           fi
 
@@ -150,6 +173,8 @@ jobs:
                 "kubectl exec deploy/aggregator -n whatsthecraic -- wget -qO- http://localhost:4000/health && echo \"AGG_OK\" || echo \"AGG_FAIL\"",
                 "echo \"\n=== Checking auth-service health ===\"",
                 "kubectl exec deploy/auth-service -n whatsthecraic -- wget -qO- http://localhost:3001/health && echo \"AUTH_OK\" || echo \"AUTH_FAIL\"",
+                "echo \"\n=== Checking auth-service readiness ===\"",
+                "kubectl exec deploy/auth-service -n whatsthecraic -- wget -qO- http://localhost:3001/ready && echo \"AUTH_READY_OK\" || echo \"AUTH_READY_FAIL\"",
                 "echo \"\n=== Checking events-service health ===\"",
                 "kubectl exec deploy/events-service -n whatsthecraic -- wget -qO- http://localhost:4003/health && echo \"EVENTS_OK\" || echo \"EVENTS_FAIL\"",
                 "echo \"\n=== Checking dj-service health ===\"",
@@ -170,9 +195,10 @@ jobs:
             # Check if all critical services are healthy
             AGG_OK=$(echo "$OUTPUT" | grep -c "AGG_OK" || echo "0")
             AUTH_OK=$(echo "$OUTPUT" | grep -c "AUTH_OK" || echo "0")
+            AUTH_READY_OK=$(echo "$OUTPUT" | grep -c "AUTH_READY_OK" || echo "0")
             EVENTS_OK=$(echo "$OUTPUT" | grep -c "EVENTS_OK" || echo "0")
 
-            if [ "$AGG_OK" = "1" ] && [ "$AUTH_OK" = "1" ] && [ "$EVENTS_OK" = "1" ]; then
+            if [ "$AGG_OK" = "1" ] && [ "$AUTH_OK" = "1" ] && [ "$AUTH_READY_OK" = "1" ] && [ "$EVENTS_OK" = "1" ]; then
               echo "All critical services are healthy!"
               exit 0
             fi
