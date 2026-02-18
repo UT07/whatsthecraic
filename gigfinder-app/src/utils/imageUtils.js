@@ -267,11 +267,15 @@ const isLikelyPlaceholderImage = (url) => {
 const normalizeSoundcloudProfileUrl = (value) => {
   const raw = (value || '').toString().trim();
   if (!raw) return null;
-  if (!raw.includes('soundcloud.com/')) return null;
+  if (!/soundcloud\.com|on\.soundcloud\.com|soundcloud\.app\.goo\.gl/i.test(raw)) return null;
   const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
   try {
     const parsed = new URL(withScheme);
-    if (!parsed.hostname.toLowerCase().includes('soundcloud.com')) return null;
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes('soundcloud.com') && !host.includes('on.soundcloud.com') && !host.includes('soundcloud.app.goo.gl')) return null;
+    if (host.includes('on.soundcloud.com') || host.includes('soundcloud.app.goo.gl')) {
+      return withScheme;
+    }
     const username = parsed.pathname.split('/').filter(Boolean)[0];
     if (!username) return null;
     return `https://soundcloud.com/${username}`;
@@ -297,6 +301,7 @@ export const fetchSoundCloudImageFromUrl = async (soundcloudUrl) => {
   if (!profileUrl) return null;
   const [, username = ''] = profileUrl.split('soundcloud.com/');
   const usernameQuery = username.trim();
+  const isCanonicalProfile = /^https?:\/\/(?:m\.)?soundcloud\.com\/[^/?#]+$/i.test(profileUrl);
 
   const cacheKey = `img_soundcloud_url_${profileUrl.toLowerCase()}`;
   const cached = imageCacheStrategy(cacheKey);
@@ -314,17 +319,18 @@ export const fetchSoundCloudImageFromUrl = async (soundcloudUrl) => {
           const data = await searchResponse.json();
           const performers = Array.isArray(data?.performers) ? data.performers : [];
           const normalizedProfile = profileUrl.toLowerCase();
-          const best = performers.find((performer) => {
+          const exactMatch = performers.find((performer) => {
             const candidate = (performer?.soundcloud || performer?.soundcloudUrl || performer?.url || '').toLowerCase();
             return candidate && (candidate.includes(normalizedProfile) || normalizedProfile.includes(candidate));
-          }) || performers
+          });
+          const best = exactMatch || (!isCanonicalProfile ? performers
             .map((performer) => ({
               performer,
               score: scoreArtistNameMatch(usernameQuery, performer?.username || performer?.name),
               hasImage: performer?.image && !isLikelyPlaceholderImage(performer.image)
             }))
             .filter((row) => row.hasImage)
-            .sort((a, b) => b.score - a.score)[0]?.performer;
+            .sort((a, b) => b.score - a.score)[0]?.performer : null);
 
           const imageUrl = toBestSoundcloudAvatar(best?.image || null);
           if (imageUrl && !isLikelyPlaceholderImage(imageUrl)) {
@@ -467,6 +473,9 @@ export const fetchArtistImage = async (artistName, options = {}) => {
     if (normalizedSoundcloudUrl) {
       const directImage = await fetchSoundCloudImageFromUrl(normalizedSoundcloudUrl);
       if (directImage) return directImage;
+      // Data integrity: if a SoundCloud URL is explicitly provided, do not
+      // substitute images from non-SoundCloud providers.
+      return null;
     }
 
     // Prefer SoundCloud first for broader artist coverage.

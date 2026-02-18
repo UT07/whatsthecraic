@@ -39,19 +39,66 @@ const getGenreIcon = (genre) => {
 
 const normalizeToken = (value) => (value ?? '').toString().toLowerCase().trim();
 
-const normalizeVenueKey = (name, city) => {
-  return `${normalizeToken(name)}::${normalizeToken(city)}`;
+const normalizeVenueName = (value) => normalizeToken(value)
+  .replace(/\b(the)\b/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const normalizeVenueKey = (name) => {
+  return normalizeVenueName(name);
 };
 
-const uniqueEvents = (events) => {
+const normalizeEventTitle = (value) => normalizeToken(value)
+  .replace(/\s*-\s*(premium priced seats?|vip packages?|platinum tickets?|accessible tickets?).*$/i, '')
+  .replace(/\s*\((rescheduled|new date|extra date)\)\s*$/i, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const normalizeEventSlot = (event) => {
+  const value = event?.start_time || event?.start_date || event?.date || null;
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value.toString().slice(0, 16);
+  return parsed.toISOString().slice(0, 16);
+};
+
+const buildEventDedupeKey = (event) => {
+  const title = normalizeEventTitle(event?.title || event?.name || event?.event_name || '');
+  const venue = normalizeVenueName(event?.venue_name || event?.venue || '');
+  const slot = normalizeEventSlot(event);
+  if (title && venue && slot) return `${title}::${venue}::${slot}`;
+  if (title && venue) return `${title}::${venue}`;
+  if (event?.ticket_url) return `ticket:${event.ticket_url}`;
+  if (event?.id) return `id:${event.id}`;
+  return '';
+};
+
+const dedupeSourceLabels = (sources) => {
+  const out = [];
+  const seen = new Set();
+  (Array.isArray(sources) ? sources : []).forEach((source) => {
+    const label = normalizeToken(source);
+    if (!label || seen.has(label)) return;
+    seen.add(label);
+    out.push(source);
+  });
+  return out;
+};
+
+const uniqueEvents = (events = []) => {
   const seen = new Set();
   const deduped = [];
-  events.forEach((event) => {
-    const key = event.id
-      ? `id:${event.id}`
-      : `${normalizeToken(event.title || event.name)}::${normalizeToken(event.venue_name || event.venue)}::${event.start_time || event.date || ''}`;
+  events.forEach((rawEvent) => {
+    const event = { ...rawEvent };
+    const key = buildEventDedupeKey(event);
     if (!key || seen.has(key)) return;
     seen.add(key);
+    event.source = dedupeSourceLabels(
+      [
+        event?.source,
+        ...(Array.isArray(event?.sources) ? event.sources.map((item) => item?.source || item).filter(Boolean) : [])
+      ]
+    ).join(', ') || event.source || null;
     deduped.push(event);
   });
   return deduped;
@@ -62,7 +109,7 @@ const mergeVenueRecords = (localVenues, events) => {
 
   const upsertVenue = (incoming) => {
     const city = incoming.city || incoming.address?.split(',').pop()?.trim() || '';
-    const key = normalizeVenueKey(incoming.name, city);
+    const key = normalizeVenueKey(incoming.name);
     if (!incoming.name || !key) return;
 
     if (!merged.has(key)) {
@@ -110,7 +157,7 @@ const mergeVenueRecords = (localVenues, events) => {
       : [event.source].filter(Boolean);
 
     upsertVenue({
-      id: `event-${normalizeToken(venueName)}`,
+      id: `event-${normalizeVenueName(venueName)}`,
       name: venueName,
       city: event.city || null,
       address: event.city || null,
@@ -145,7 +192,7 @@ const VenueSkeleton = () => (
 const VenueEventCard = ({ event, onSave }) => {
   const img = event.image_url || event.imageUrl || getBestImage(event.images, 'thumb', 200);
   const eventGenre = event.genre || (Array.isArray(event.genres) ? event.genres[0] : null);
-  const eventSource = event.source || (Array.isArray(event.sources) ? event.sources.map(s => s.source).filter(Boolean).join(', ') : null);
+  const eventSource = event.source || dedupeSourceLabels(Array.isArray(event.sources) ? event.sources.map(s => s.source).filter(Boolean) : []).join(', ');
   return (
     <div style={{
       display: 'flex', gap: '0.75rem', padding: '0.75rem',
@@ -280,7 +327,7 @@ const Venues = () => {
       });
       const remoteEvents = Array.isArray(data?.events) ? data.events : [];
       const catalogMatches = eventsCatalog.filter(event =>
-        normalizeToken(event.venue_name).includes(normalizeToken(venue.name))
+        normalizeVenueName(event.venue_name).includes(normalizeVenueName(venue.name))
       );
       setVenueEvents(uniqueEvents([...cached, ...catalogMatches, ...remoteEvents]));
     } catch (err) {

@@ -494,6 +494,67 @@ const syncLocalEventsToCanonical = async () => {
     const text = value.toString();
     return text.length >= 8 ? text.slice(0, 8) : text;
   };
+  const normalizeMatchToken = (value) => (value || '')
+    .toString()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normalizeTitleForMatch = (value) => normalizeMatchToken(value)
+    .replace(/\s*-\s*(premium priced seats?|vip packages?|platinum tickets?|accessible tickets?).*$/i, '')
+    .replace(/\s*\((rescheduled|new date|extra date)\)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normalizeVenueForMatch = (value) => normalizeMatchToken(value)
+    .replace(/\b(the)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const overlaps = (a, b) => {
+    if (!a || !b) return false;
+    return a === b || a.includes(b) || b.includes(a);
+  };
+  const findExistingCanonicalMatch = async (eventRecord, startDate) => {
+    const startMs = startDate.getTime();
+    const lower = new Date(startMs - (2 * 60 * 60 * 1000));
+    const upper = new Date(startMs + (2 * 60 * 60 * 1000));
+    const [candidates] = await pool.query(
+      `SELECT id, title, venue_name, city, start_time
+         FROM events
+        WHERE start_time >= ? AND start_time <= ?
+          AND (? = '' OR LOWER(city) = LOWER(?))
+        ORDER BY ABS(TIMESTAMPDIFF(MINUTE, start_time, ?)) ASC
+        LIMIT 80`,
+      [
+        lower.toISOString().slice(0, 19).replace('T', ' '),
+        upper.toISOString().slice(0, 19).replace('T', ' '),
+        eventRecord.city || '',
+        eventRecord.city || '',
+        eventRecord.start_time
+      ]
+    );
+    const localTitle = normalizeTitleForMatch(eventRecord.title);
+    const localVenue = normalizeVenueForMatch(eventRecord.venue_name);
+    let best = null;
+    let bestScore = -1;
+
+    candidates.forEach((candidate) => {
+      const candidateTitle = normalizeTitleForMatch(candidate.title);
+      const candidateVenue = normalizeVenueForMatch(candidate.venue_name);
+      const titleMatch = overlaps(localTitle, candidateTitle);
+      const venueMatch = !localVenue || !candidateVenue || overlaps(localVenue, candidateVenue);
+      if (!titleMatch || !venueMatch) return;
+
+      const candidateMs = new Date(candidate.start_time).getTime();
+      const deltaMin = Number.isNaN(candidateMs) ? 9999 : Math.abs(candidateMs - startMs) / 60000;
+      const score = (titleMatch ? 8 : 0) + (venueMatch ? 6 : 0) - Math.min(deltaMin / 30, 4);
+      if (score > bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
+    });
+
+    return best?.id || null;
+  };
   const [rows] = await pool.query(
     `SELECT le.*
      FROM local_events le
@@ -528,7 +589,10 @@ const syncLocalEventsToCanonical = async () => {
       images: []
     };
 
-    const eventId = await upsertEvent(pool, eventRecord);
+    let eventId = await findExistingCanonicalMatch(eventRecord, startDate);
+    if (!eventId) {
+      eventId = await upsertEvent(pool, eventRecord);
+    }
     await upsertSourceEvent(pool, {
       source: 'local',
       source_id: String(ev.id),
@@ -758,6 +822,24 @@ const dedupeSourceEntries = (sources) => {
     bySource.set(source, entry.source_id ? { source: entry.source, source_id: entry.source_id } : { source: entry.source });
   });
   return Array.from(bySource.values());
+};
+
+const normalizeVenueForDedupe = (value) => normalizeToken(value)
+  .replace(/\b(the)\b/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const normalizeTitleForDedupe = (value) => normalizeToken(value)
+  .replace(/\s*-\s*(premium priced seats?|vip packages?|platinum tickets?|accessible tickets?).*$/i, '')
+  .replace(/\s*\((rescheduled|new date|extra date)\)\s*$/i, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const normalizeTimeForDedupe = (value) => {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value.toString().slice(0, 16);
+  return parsed.toISOString().slice(0, 16);
 };
 
 const normalizeTokenList = (value) => {
@@ -1113,12 +1195,12 @@ const dedupeEventPayloads = (events) => {
 
   (Array.isArray(events) ? events : []).forEach((event) => {
     const key = [
-      normalizeToken(event.title),
-      normalizeToken(event.venue_name),
-      (event.start_time || '').slice(0, 16)
+      normalizeTitleForDedupe(event.title),
+      normalizeVenueForDedupe(event.venue_name),
+      normalizeTimeForDedupe(event.start_time)
     ].join('::');
 
-    if (!key || !normalizeToken(event.title)) return;
+    if (!key || !normalizeTitleForDedupe(event.title)) return;
 
     if (!byKey.has(key)) {
       byKey.set(key, {

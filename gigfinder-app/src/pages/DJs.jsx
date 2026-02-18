@@ -312,10 +312,14 @@ const DJs = () => {
   }, [djs, performers, spotifyProfile, soundcloudProfile, filters, localOnly]);
 
   const UnifiedArtistCard = ({ artist, index }) => {
-    const [artistImage, setArtistImage] = useState(artist.image || null);
+    const [artistImage, setArtistImage] = useState(artist.soundcloud ? null : (artist.image || null));
     const [loadingImage, setLoadingImage] = useState(false);
     const [isInView, setIsInView] = useState(Boolean(artist.image));
     const cardRef = useRef(null);
+
+    useEffect(() => {
+      setArtistImage(artist.soundcloud ? null : (artist.image || null));
+    }, [artist.image, artist.soundcloud, artist.name]);
 
     useEffect(() => {
       if (isInView) return;
