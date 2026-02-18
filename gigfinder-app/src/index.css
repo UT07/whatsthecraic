@@ -377,6 +377,29 @@ code {
 
   .card-event-body {
     padding: 0.85rem 1rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-height: 210px;
+  }
+
+  .event-card-reason-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-height: 1.35rem;
+  }
+
+  .event-card-title {
+    min-height: 2.5rem;
+  }
+
+  .event-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: auto;
   }
 
   /* ─── GLASS PANELS ─── */

@@ -282,6 +282,8 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
   const spotifyTotal = sumMapValues(spotifyGenreMap);
   const soundcloudTotal = sumMapValues(soundcloudGenreMap);
   const savedTotal = sumMapValues(savedGenreMap);
+  const hasLinkedSoundcloud = Boolean(soundcloudProfile?.username || soundcloudProfile?.permalink_url);
+  const soundcloudNeedsSync = hasLinkedSoundcloud && soundcloudTotal === 0;
   const sourceData = {
     labels: ['Spotify', 'SoundCloud', 'Saved Events'],
     datasets: [{
@@ -342,6 +344,11 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
             <p style={{ fontSize: '0.78rem', color: '#a0a0a0' }}>
               Built from Spotify, SoundCloud, and {savedEvents.length} saved events
             </p>
+            {soundcloudNeedsSync && (
+              <p style={{ fontSize: '0.72rem', color: '#ff8c42', marginTop: '0.25rem' }}>
+                SoundCloud is linked but no genre signals were found yet. Press Sync after liking tracks.
+              </p>
+            )}
           </div>
           <div style={{
             padding: '0.3rem 0.7rem',

@@ -50,6 +50,8 @@ const SOUNDCLOUD_HTTP_BACKOFF_MS = Number.parseInt(process.env.SOUNDCLOUD_HTTP_B
 const SOUNDCLOUD_HTTP_RETRY_ATTEMPTS = Number.parseInt(process.env.SOUNDCLOUD_HTTP_RETRY_ATTEMPTS || '2', 10);
 const soundcloudHttpCache = new Map();
 const soundcloudHttpInFlight = new Map();
+let soundcloudAccessToken = null;
+let soundcloudAccessTokenExpiresAt = 0;
 
 const warnOnMissingEnv = () => {
   const missing = [];
@@ -316,7 +318,7 @@ const spotifyConfigured = () => {
   return Boolean(SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET && SPOTIFY_REDIRECT_URI);
 };
 
-const soundcloudConfigured = () => Boolean(SOUNDCLOUD_CLIENT_ID);
+const soundcloudConfigured = () => Boolean(SOUNDCLOUD_CLIENT_ID && SOUNDCLOUD_CLIENT_SECRET);
 
 const normalizeSoundcloudToken = (value) => (value || '')
   .toString()
@@ -396,6 +398,59 @@ const buildSoundcloudFallbackProfile = (profileInput) => {
   };
 };
 
+const getSoundcloudAccessToken = async () => {
+  if (!soundcloudConfigured()) {
+    const error = new Error('SoundCloud is not configured');
+    error.status = 500;
+    throw error;
+  }
+
+  if (soundcloudAccessToken && Date.now() < soundcloudAccessTokenExpiresAt - 60000) {
+    return soundcloudAccessToken;
+  }
+
+  let response;
+  try {
+    response = await fetch('https://secure.soundcloud.com/oauth/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${SOUNDCLOUD_CLIENT_ID}:${SOUNDCLOUD_CLIENT_SECRET}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json'
+      },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials'
+      }).toString()
+    });
+  } catch (err) {
+    const error = new Error(`SoundCloud auth request failed: ${err.message}`);
+    error.status = 502;
+    throw error;
+  }
+
+  const text = await response.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
+  }
+
+  if (!response.ok || !data.access_token) {
+    const message = data.error_description || data.error || data.error_message || 'Failed to authenticate with SoundCloud';
+    const error = new Error(message);
+    error.status = response.status || 500;
+    error.data = data;
+    throw error;
+  }
+
+  soundcloudAccessToken = data.access_token;
+  soundcloudAccessTokenExpiresAt = Date.now() + (Number(data.expires_in || 3600) * 1000);
+  return soundcloudAccessToken;
+};
+
 const fetchSoundcloudJson = async (url) => {
   if (!soundcloudConfigured()) {
     const error = new Error('SoundCloud is not configured');
@@ -404,7 +459,9 @@ const fetchSoundcloudJson = async (url) => {
   }
 
   const parsed = new URL(url);
-  parsed.searchParams.set('client_id', SOUNDCLOUD_CLIENT_ID);
+  if (parsed.hostname === 'api-v2.soundcloud.com') {
+    parsed.hostname = 'api.soundcloud.com';
+  }
   const requestUrl = parsed.toString();
   const now = Date.now();
   const cached = soundcloudHttpCache.get(requestUrl);
@@ -419,8 +476,12 @@ const fetchSoundcloudJson = async (url) => {
   const task = (async () => {
     let attempt = 0;
     while (true) {
+      const accessToken = await getSoundcloudAccessToken();
       const res = await fetch(requestUrl, {
-        headers: { Accept: 'application/json' }
+        headers: {
+          Accept: 'application/json',
+          Authorization: `OAuth ${accessToken}`
+        }
       });
       const text = await res.text();
       let data = {};
@@ -445,6 +506,12 @@ const fetchSoundcloudJson = async (url) => {
 
       const status = Number(res.status || 0);
       const message = data.error_message || data.error?.message || data.error || 'SoundCloud API error';
+      if (status === 401 && attempt < SOUNDCLOUD_HTTP_RETRY_ATTEMPTS) {
+        soundcloudAccessToken = null;
+        soundcloudAccessTokenExpiresAt = 0;
+        attempt += 1;
+        continue;
+      }
       if (isRetryableSoundcloudError(status) && attempt < SOUNDCLOUD_HTTP_RETRY_ATTEMPTS) {
         const retryAfter = parseRetryAfterMs(res.headers.get('retry-after'));
         const backoff = retryAfter ?? Math.min(SOUNDCLOUD_HTTP_BACKOFF_MS * (attempt + 1), 120000);
@@ -486,7 +553,7 @@ const resolveSoundcloudUser = async (profileInput) => {
 
   // Resolve direct SoundCloud profile URL first.
   if (normalizedInput.startsWith('http://') || normalizedInput.startsWith('https://')) {
-    const resolved = await fetchSoundcloudJson(`https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(normalizedInput)}`);
+    const resolved = await fetchSoundcloudJson(`https://api.soundcloud.com/resolve?url=${encodeURIComponent(normalizedInput)}`);
     if ((resolved?.kind || '') === 'user' || resolved?.username) {
       return resolved;
     }
@@ -496,8 +563,10 @@ const resolveSoundcloudUser = async (profileInput) => {
   }
 
   // Resolve username by search.
-  const search = await fetchSoundcloudJson(`https://api-v2.soundcloud.com/search/users?q=${encodeURIComponent(normalizedInput)}&limit=20`);
-  const users = Array.isArray(search?.collection) ? search.collection : [];
+  const search = await fetchSoundcloudJson(`https://api.soundcloud.com/users?q=${encodeURIComponent(normalizedInput)}&limit=20`);
+  const users = Array.isArray(search)
+    ? search
+    : (Array.isArray(search?.collection) ? search.collection : []);
   if (!users.length) {
     const error = new Error('No SoundCloud user found for the provided profile');
     error.status = 404;
@@ -698,8 +767,11 @@ const getSoundcloudPersistedUserId = (user) => {
   return /^\d+$/.test(lookupId) ? lookupId : null;
 };
 
-const getSoundcloudCollection = (response) =>
-  Array.isArray(response?.collection) ? response.collection : [];
+const getSoundcloudCollection = (response) => {
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.collection)) return response.collection;
+  return [];
+};
 
 const toSoundcloudTrack = (item) => {
   if (!item || typeof item !== 'object') return null;
@@ -841,17 +913,15 @@ const syncSoundcloudProfile = async (userId, profileInput = null) => {
   }
 
   const encodedId = encodeURIComponent(lookupId);
-  const [tracksResult, likesResult, trackLikesResult] = await Promise.allSettled([
-    fetchSoundcloudJson(`https://api-v2.soundcloud.com/users/${encodedId}/tracks?limit=200`),
-    fetchSoundcloudJson(`https://api-v2.soundcloud.com/users/${encodedId}/likes?limit=200`),
-    fetchSoundcloudJson(`https://api-v2.soundcloud.com/users/${encodedId}/track_likes?limit=200`)
+  const [tracksResult, favoritesResult] = await Promise.allSettled([
+    fetchSoundcloudJson(`https://api.soundcloud.com/users/${encodedId}/tracks?limit=200`),
+    fetchSoundcloudJson(`https://api.soundcloud.com/users/${encodedId}/favorites?limit=200`)
   ]);
 
   const ownTracks = tracksResult.status === 'fulfilled' ? getSoundcloudCollection(tracksResult.value) : [];
-  const likedTracks = [
-    ...(likesResult.status === 'fulfilled' ? extractTracksFromSoundcloudLikes(likesResult.value) : []),
-    ...(trackLikesResult.status === 'fulfilled' ? extractTracksFromSoundcloudLikes(trackLikesResult.value) : [])
-  ];
+  const likedTracks = favoritesResult.status === 'fulfilled'
+    ? extractTracksFromSoundcloudLikes(favoritesResult.value)
+    : [];
   const mergedTracks = mergeSoundcloudTracks(ownTracks, likedTracks);
 
   if (mergedTracks.length === 0 && existing) {

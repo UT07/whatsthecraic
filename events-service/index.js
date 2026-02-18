@@ -792,6 +792,112 @@ const extractGenreList = (items) => {
   );
 };
 
+const escapeLikeToken = (value) => (value || '')
+  .toString()
+  .replace(/[\\%_]/g, (token) => `\\${token}`);
+
+const getSpotifyArtistSeeds = async ({ userId, q, artist, limit = 18 }) => {
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) return [];
+
+  const seeds = new Set();
+
+  if (userId) {
+    try {
+      const [rows] = await pool.query(
+        'SELECT top_artists FROM user_spotify WHERE user_id = ?',
+        [userId]
+      );
+      const topArtists = rows.length ? parseJson(rows[0].top_artists) : [];
+      extractNameList(topArtists).slice(0, 10).forEach((name) => {
+        const token = normalizeToken(name);
+        if (token) seeds.add(token);
+      });
+    } catch (err) {
+      console.warn('[events] failed to load Spotify top artists for seeds:', err.message);
+    }
+  }
+
+  const searchTerms = dedupeList([
+    ...(artist ? [artist] : []),
+    ...(q ? [q] : [])
+  ]).slice(0, 3);
+
+  for (const term of searchTerms) {
+    try {
+      const artists = await spotifyClient.searchArtists(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, term, 12);
+      artists.slice(0, 6).forEach((row) => {
+        const token = normalizeToken(row?.name);
+        if (token) seeds.add(token);
+      });
+    } catch (err) {
+      console.warn('[events] spotify artist seed search failed:', err.message);
+    }
+  }
+
+  return Array.from(seeds).slice(0, limit);
+};
+
+const findSpotifyDrivenEventRows = async ({
+  seeds,
+  city,
+  fromDate,
+  toDate,
+  limit = 200
+}) => {
+  if (!Array.isArray(seeds) || seeds.length === 0) {
+    return { rows: [], matchedById: new Map() };
+  }
+
+  const where = [
+    'e.start_time >= ?',
+    'e.start_time <= ?'
+  ];
+  const params = [
+    fromDate.toISOString().slice(0, 19).replace('T', ' '),
+    toDate.toISOString().slice(0, 19).replace('T', ' ')
+  ];
+
+  if (city) {
+    where.push('LOWER(e.city) = LOWER(?)');
+    params.push(city);
+  }
+
+  const matchClauses = [];
+  const seedList = dedupeList(seeds.map(normalizeToken).filter(Boolean)).slice(0, 20);
+  seedList.forEach((seed) => {
+    const likeToken = `%${escapeLikeToken(seed)}%`;
+    matchClauses.push(`(
+      LOWER(e.title) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(e.description, '')) LIKE ? ESCAPE '\\'
+      OR JSON_SEARCH(e.tags, 'one', ?) IS NOT NULL
+    )`);
+    params.push(likeToken, likeToken, seed);
+  });
+
+  if (!matchClauses.length) {
+    return { rows: [], matchedById: new Map() };
+  }
+
+  const [rows] = await pool.query(
+    `SELECT DISTINCT e.*
+     FROM events e
+     WHERE ${where.join(' AND ')}
+       AND (${matchClauses.join(' OR ')})
+     ORDER BY e.start_time ASC
+     LIMIT ?`,
+    [...params, Math.min(limit, 500)]
+  );
+
+  const matchedById = new Map();
+  rows.forEach((row) => {
+    const blob = `${normalizeToken(row.title)} ${normalizeToken(row.description)}`;
+    const matchedSeed = seedList.find((seed) => blob.includes(seed)) || null;
+    if (matchedSeed) matchedById.set(row.id, matchedSeed);
+  });
+
+  return { rows, matchedById };
+};
+
 const buildPerformerSearchQuery = (signals, fallback = 'live dj set electronic house techno') => {
   const artists = dedupeList([
     ...(signals?.preferredArtists || []),
@@ -844,7 +950,7 @@ const cleanupPerformersCache = () => {
 };
 
 const getSoundcloudTasteSignals = async (artistNames) => {
-  if (!SOUNDCLOUD_ENABLED || !SOUNDCLOUD_CLIENT_ID) {
+  if (!SOUNDCLOUD_ENABLED || !SOUNDCLOUD_CLIENT_ID || !SOUNDCLOUD_CLIENT_SECRET) {
     return { soundcloudArtists: [], soundcloudGenres: [] };
   }
 
@@ -864,7 +970,7 @@ const getSoundcloudTasteSignals = async (artistNames) => {
 
   for (const seed of seeds) {
     try {
-      const users = await soundcloudClient.searchUsers(SOUNDCLOUD_CLIENT_ID, seed, 3);
+      const users = await soundcloudClient.searchUsers(SOUNDCLOUD_CLIENT_ID, SOUNDCLOUD_CLIENT_SECRET, seed, 3);
       if (!Array.isArray(users) || users.length === 0) continue;
 
       const seedToken = normalizeToken(seed);
@@ -1536,7 +1642,7 @@ app.get('/v1/events/search', async (req, res) => {
     artist: z.string().optional(),
     venue: z.string().optional(),
     priceMax: z.string().optional(),
-    source: z.enum(['eventbrite', 'ticketmaster', 'bandsintown', 'dice', 'local']).optional(),
+    source: z.enum(['eventbrite', 'ticketmaster', 'bandsintown', 'dice', 'local', 'spotify']).optional(),
     rank: z.enum(['time', 'personalized']).optional(),
     includeHidden: z.string().optional(),
     limit: z.string().optional(),
@@ -1628,7 +1734,7 @@ app.get('/v1/events/search', async (req, res) => {
     params.push(keyword);
   }
 
-  if (source) {
+  if (source && source !== 'spotify') {
     where.push('EXISTS (SELECT 1 FROM source_events se WHERE se.event_id = events.id AND se.source = ?)');
     params.push(source);
   }
@@ -1644,12 +1750,55 @@ app.get('/v1/events/search', async (req, res) => {
   const offsetValue = Number.isNaN(parsedOffset) ? 0 : Math.max(parsedOffset, 0);
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const [rows] = await pool.query(
-    `SELECT * FROM events ${whereSql} ORDER BY start_time ASC LIMIT ? OFFSET ?`,
-    [...params, limitValue, offsetValue]
-  );
+  const [baseRows] = source === 'spotify'
+    ? [[]]
+    : await pool.query(
+      `SELECT * FROM events ${whereSql} ORDER BY start_time ASC LIMIT ? OFFSET ?`,
+      [...params, limitValue, offsetValue]
+    );
+
+  let rows = Array.isArray(baseRows) ? [...baseRows] : [];
+  let spotifyMatchedById = new Map();
+  if (SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET && (source === undefined || source === 'spotify')) {
+    try {
+      const spotifySeeds = await getSpotifyArtistSeeds({
+        userId,
+        q,
+        artist,
+        limit: 18
+      });
+      if (spotifySeeds.length > 0) {
+        const spotifyMatches = await findSpotifyDrivenEventRows({
+          seeds: spotifySeeds,
+          city,
+          fromDate,
+          toDate,
+          limit: limitValue
+        });
+        spotifyMatchedById = spotifyMatches.matchedById;
+        const byId = new Map(rows.map((row) => [row.id, row]));
+        spotifyMatches.rows.forEach((row) => {
+          if (!byId.has(row.id)) byId.set(row.id, row);
+        });
+        rows = Array.from(byId.values())
+          .sort((a, b) => {
+            const aTime = a.start_time ? new Date(a.start_time).getTime() : 0;
+            const bTime = b.start_time ? new Date(b.start_time).getTime() : 0;
+            return aTime - bTime;
+          })
+          .slice(0, limitValue);
+      }
+    } catch (err) {
+      console.warn('[events/search] Spotify event enrichment failed:', err.message);
+    }
+  }
+
+  if (source === 'spotify') {
+    rows = rows.filter((row) => spotifyMatchedById.has(row.id));
+  }
 
   const eventIds = rows.map(row => row.id);
+  const eventIdSet = new Set(eventIds);
   let sourcesByEvent = new Map();
   if (eventIds.length > 0) {
     const [sourceRows] = await pool.query(
@@ -1662,6 +1811,16 @@ app.get('/v1/events/search', async (req, res) => {
       acc.set(row.event_id, entry);
       return acc;
     }, new Map());
+  }
+  if (spotifyMatchedById.size > 0) {
+    spotifyMatchedById.forEach((token, eventId) => {
+      if (!eventIdSet.has(eventId)) return;
+      const existing = sourcesByEvent.get(eventId) || [];
+      if (!existing.some((sourceRow) => normalizeToken(sourceRow.source) === 'spotify')) {
+        existing.push({ source: 'spotify', source_id: token || 'taste' });
+      }
+      sourcesByEvent.set(eventId, existing);
+    });
   }
 
   let ranked = false;
@@ -1906,13 +2065,13 @@ app.get('/v1/performers', async (req, res) => {
     }
   }
 
-  if (includeSet.has('soundcloud') && SOUNDCLOUD_ENABLED && SOUNDCLOUD_CLIENT_ID) {
+  if (includeSet.has('soundcloud') && SOUNDCLOUD_ENABLED && SOUNDCLOUD_CLIENT_ID && SOUNDCLOUD_CLIENT_SECRET) {
     try {
-      let users = await soundcloudClient.searchUsers(SOUNDCLOUD_CLIENT_ID, tasteQuery, 30);
+      let users = await soundcloudClient.searchUsers(SOUNDCLOUD_CLIENT_ID, SOUNDCLOUD_CLIENT_SECRET, tasteQuery, 30);
       if ((!Array.isArray(users) || users.length === 0) && keywordTokens.length > 1) {
         const mergedUsers = new Map();
         for (const token of keywordTokens.slice(0, 4)) {
-          const partial = await soundcloudClient.searchUsers(SOUNDCLOUD_CLIENT_ID, token, 8);
+          const partial = await soundcloudClient.searchUsers(SOUNDCLOUD_CLIENT_ID, SOUNDCLOUD_CLIENT_SECRET, token, 8);
           partial.forEach((user) => {
             const userKey = normalizeToken(user?.username || user?.name);
             if (!userKey || mergedUsers.has(userKey)) return;
@@ -2071,7 +2230,7 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
     artist: z.string().optional(),
     venue: z.string().optional(),
     priceMax: z.string().optional(),
-    source: z.enum(['eventbrite', 'ticketmaster', 'bandsintown', 'dice', 'local']).optional(),
+    source: z.enum(['eventbrite', 'ticketmaster', 'bandsintown', 'dice', 'local', 'spotify']).optional(),
     limit: z.string().optional(),
     offset: z.string().optional()
   });
@@ -2141,7 +2300,7 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
       params.push(max);
     }
   }
-  if (source) {
+  if (source && source !== 'spotify') {
     where.push('EXISTS (SELECT 1 FROM source_events se WHERE se.event_id = events.id AND se.source = ?)');
     params.push(source);
   }
@@ -2155,12 +2314,55 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
   const offsetValue = Number.isNaN(parsedOffset) ? 0 : Math.max(parsedOffset, 0);
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const [rows] = await pool.query(
-    `SELECT * FROM events ${whereSql} ORDER BY start_time ASC LIMIT ? OFFSET ?`,
-    [...params, limitValue, offsetValue]
-  );
+  const [baseRows] = source === 'spotify'
+    ? [[]]
+    : await pool.query(
+      `SELECT * FROM events ${whereSql} ORDER BY start_time ASC LIMIT ? OFFSET ?`,
+      [...params, limitValue, offsetValue]
+    );
+
+  let rows = Array.isArray(baseRows) ? [...baseRows] : [];
+  let spotifyMatchedById = new Map();
+  if (SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET && (source === undefined || source === 'spotify')) {
+    try {
+      const spotifySeeds = await getSpotifyArtistSeeds({
+        userId,
+        q,
+        artist,
+        limit: 18
+      });
+      if (spotifySeeds.length > 0) {
+        const spotifyMatches = await findSpotifyDrivenEventRows({
+          seeds: spotifySeeds,
+          city,
+          fromDate,
+          toDate,
+          limit: limitValue
+        });
+        spotifyMatchedById = spotifyMatches.matchedById;
+        const byId = new Map(rows.map((row) => [row.id, row]));
+        spotifyMatches.rows.forEach((row) => {
+          if (!byId.has(row.id)) byId.set(row.id, row);
+        });
+        rows = Array.from(byId.values())
+          .sort((a, b) => {
+            const aTime = a.start_time ? new Date(a.start_time).getTime() : 0;
+            const bTime = b.start_time ? new Date(b.start_time).getTime() : 0;
+            return aTime - bTime;
+          })
+          .slice(0, limitValue);
+      }
+    } catch (err) {
+      console.warn('[feed] Spotify event enrichment failed:', err.message);
+    }
+  }
+
+  if (source === 'spotify') {
+    rows = rows.filter((row) => spotifyMatchedById.has(row.id));
+  }
 
   const eventIds = rows.map(row => row.id);
+  const eventIdSet = new Set(eventIds);
   let sourcesByEvent = new Map();
   if (eventIds.length > 0) {
     const [sourceRows] = await pool.query(
@@ -2173,6 +2375,16 @@ app.get('/v1/users/me/feed', requireAuth, async (req, res) => {
       acc.set(row.event_id, entry);
       return acc;
     }, new Map());
+  }
+  if (spotifyMatchedById.size > 0) {
+    spotifyMatchedById.forEach((token, eventId) => {
+      if (!eventIdSet.has(eventId)) return;
+      const existing = sourcesByEvent.get(eventId) || [];
+      if (!existing.some((sourceRow) => normalizeToken(sourceRow.source) === 'spotify')) {
+        existing.push({ source: 'spotify', source_id: token || 'taste' });
+      }
+      sourcesByEvent.set(eventId, existing);
+    });
   }
 
   const scored = rows.map(row => {

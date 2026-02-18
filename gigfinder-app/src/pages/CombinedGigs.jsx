@@ -170,8 +170,10 @@ const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
         )}
       </div>
       <div className="card-event-body">
-        <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
-        <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: '0.35rem' }}>
+        <div className="event-card-reason-row">
+          <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
+        </div>
+        <h3 className="line-clamp-2 event-card-title" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: 0 }}>
           {event.title}
         </h3>
         <div className="venue-strip">
@@ -187,7 +189,7 @@ const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
           </span>
         </div>
         <EventSessionsPreview event={event} />
-        <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
+        <div className="event-card-actions">
           {event.ticket_url && (
             <a href={event.ticket_url} target="_blank" rel="noreferrer"
               className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: '0.78rem' }}>
@@ -423,6 +425,7 @@ const CombinedGigs = () => {
                   <option value="eventbrite">Eventbrite</option>
                   <option value="bandsintown">Bandsintown</option>
                   <option value="dice">Dice.fm</option>
+                  <option value="spotify">Spotify picks</option>
                   <option value="local">Local</option>
                 </select>
                 <input className="input" type="number" placeholder="Max price (EUR)" value={filters.priceMax} onChange={(e) => setFilters({ ...filters, priceMax: e.target.value })} />

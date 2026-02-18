@@ -21,14 +21,21 @@ const splitGenres = (value) => {
     .filter(Boolean);
 };
 
-const computeArtistRelevance = (artist, spotifyProfile, filters) => {
+const computeArtistRelevance = (artist, spotifyProfile, soundcloudProfile, filters) => {
   const spotifyArtists = (spotifyProfile?.top_artists || [])
     .map(item => normalizeToken(typeof item === 'string' ? item : item?.name))
     .filter(Boolean);
   const spotifyGenres = (spotifyProfile?.top_genres || [])
     .map(item => normalizeToken(typeof item === 'string' ? item : item?.genre))
     .filter(Boolean);
+  const soundcloudArtists = (soundcloudProfile?.top_artists || [])
+    .map(item => normalizeToken(typeof item === 'string' ? item : item?.name))
+    .filter(Boolean);
+  const soundcloudGenres = (soundcloudProfile?.top_genres || [])
+    .map(item => normalizeToken(typeof item === 'string' ? item : item?.genre))
+    .filter(Boolean);
   const spotifyGenreSet = new Set(spotifyGenres);
+  const soundcloudGenreSet = new Set(soundcloudGenres);
 
   let raw = 0;
   const reasons = [];
@@ -41,11 +48,23 @@ const computeArtistRelevance = (artist, spotifyProfile, filters) => {
     raw += Math.min(artistMatches.length, 3) * 4;
     reasons.push('spotify artist');
   }
+  const soundcloudArtistMatches = soundcloudArtists.filter(token =>
+    token && (artistName.includes(token) || token.includes(artistName))
+  );
+  if (soundcloudArtistMatches.length > 0) {
+    raw += Math.min(soundcloudArtistMatches.length, 3) * 4;
+    reasons.push('soundcloud artist');
+  }
 
   const genreMatches = (artist.genre_tokens || []).filter(token => spotifyGenreSet.has(token));
   if (genreMatches.length > 0) {
     raw += Math.min(genreMatches.length, 4) * 2;
     reasons.push('genre match');
+  }
+  const soundcloudGenreMatches = (artist.genre_tokens || []).filter(token => soundcloudGenreSet.has(token));
+  if (soundcloudGenreMatches.length > 0) {
+    raw += Math.min(soundcloudGenreMatches.length, 4) * 2;
+    reasons.push('soundcloud genre');
   }
 
   const qToken = normalizeToken(filters.q);
@@ -73,6 +92,7 @@ const DJs = () => {
   const [performers, setPerformers] = useState([]);
   const [performersLoading, setPerformersLoading] = useState(false);
   const [spotifyProfile, setSpotifyProfile] = useState(null);
+  const [soundcloudProfile, setSoundcloudProfile] = useState(null);
   const [localOnly, setLocalOnly] = useState(false);
 
   const [filters, setFilters] = useState({ q: '', city: '', genres: '', feeMax: '' });
@@ -117,9 +137,13 @@ const DJs = () => {
   useEffect(() => { fetchDJs(); }, []);
 
   useEffect(() => {
-    authAPI.getSpotifyProfile()
-      .then(setSpotifyProfile)
-      .catch(() => setSpotifyProfile(null));
+    Promise.all([
+      authAPI.getSpotifyProfile().catch(() => null),
+      authAPI.getSoundCloudProfile().catch(() => null)
+    ]).then(([spotify, soundcloud]) => {
+      setSpotifyProfile(spotify);
+      setSoundcloudProfile(soundcloud);
+    });
   }, []);
 
   useEffect(() => {
@@ -273,7 +297,7 @@ const DJs = () => {
       })
       .map((artist) => ({
         ...artist,
-        ...computeArtistRelevance(artist, spotifyProfile, filters)
+        ...computeArtistRelevance(artist, spotifyProfile, soundcloudProfile, filters)
       }))
       .sort((a, b) => {
         if (b.relevance_score !== a.relevance_score) return b.relevance_score - a.relevance_score;
@@ -285,7 +309,7 @@ const DJs = () => {
         }
         return (a.name || '').localeCompare(b.name || '');
       });
-  }, [djs, performers, spotifyProfile, filters, localOnly]);
+  }, [djs, performers, spotifyProfile, soundcloudProfile, filters, localOnly]);
 
   const UnifiedArtistCard = ({ artist, index }) => {
     const [artistImage, setArtistImage] = useState(artist.image || null);
@@ -370,6 +394,13 @@ const DJs = () => {
                 Mixcloud ↗
               </a>
             )}
+            {artist.soundcloud && (
+              <a href={artist.soundcloud} target="_blank" rel="noopener noreferrer"
+                className="chip"
+                style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(255,140,66,0.15)', borderColor: '#ff8c42', color: '#ff8c42', textDecoration: 'none' }}>
+                SoundCloud ↗
+              </a>
+            )}
             {artist.localDj && isAdmin && (
               <>
                 <button onClick={() => openModal(artist.localDj)} className="btn btn-outline btn-sm" style={{ fontSize: '0.72rem' }}>Edit</button>
@@ -404,7 +435,7 @@ const DJs = () => {
           <p className="section-subtitle">
             {localOnly
               ? 'Showing only local DB artists from Ireland.'
-              : 'Unified artists across local DB + external APIs, ranked by your Spotify taste'}
+              : 'Unified artists across local DB + external APIs, ranked by your Spotify + SoundCloud taste'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>

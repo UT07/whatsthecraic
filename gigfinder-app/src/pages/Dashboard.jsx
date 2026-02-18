@@ -239,7 +239,7 @@ const EventCard = ({ event, index, saved, onSave, onExplain, onCardClick, showFe
       </div>
       <div className="card-event-body">
         {/* ML match reason */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+        <div className="event-card-reason-row">
           <MatchBadge reasons={event.rank_reasons} score={event.rank_score} />
           {onExplain && (event.rank_reasons || event.rank_score) && (
             <button
@@ -257,7 +257,7 @@ const EventCard = ({ event, index, saved, onSave, onExplain, onCardClick, showFe
             </button>
           )}
         </div>
-        <h3 className="line-clamp-2" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: '0.35rem', marginTop: event.rank_reasons || event.rank_score ? '0.35rem' : 0 }}>
+        <h3 className="line-clamp-2 event-card-title" style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.3, marginBottom: 0 }}>
           {event.title}
         </h3>
         <div className="venue-strip">
@@ -272,28 +272,25 @@ const EventCard = ({ event, index, saved, onSave, onExplain, onCardClick, showFe
           </div>
         </div>
         <EventSessionsPreview event={event} />
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.6rem' }}>
-          <div />
-          <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-            {showFeedback && (
-              <FeedbackButtons
-                eventId={event.id}
-                size="sm"
-                context={{ page: 'dashboard', position: index }}
-              />
-            )}
-            {event.ticket_url && (
-              <a href={event.ticket_url} target="_blank" rel="noreferrer"
-                className="btn btn-sm btn-primary" style={{ fontSize: '0.72rem', padding: '0.3rem 0.65rem' }}>
-                Tickets
-              </a>
-            )}
-            <button onClick={() => onSave(event.id)}
-              className={`btn btn-sm ${saved ? 'btn-outline' : 'btn-ghost'}`}
-              style={{ fontSize: '0.85rem', padding: '0.3rem 0.5rem' }}>
-              {saved ? '\u2764\uFE0F' : '\u2661'}
-            </button>
-          </div>
+        <div className="event-card-actions">
+          {showFeedback && (
+            <FeedbackButtons
+              eventId={event.id}
+              size="sm"
+              context={{ page: 'dashboard', position: index }}
+            />
+          )}
+          {event.ticket_url && (
+            <a href={event.ticket_url} target="_blank" rel="noreferrer"
+              className="btn btn-sm btn-primary" style={{ fontSize: '0.72rem', padding: '0.3rem 0.65rem' }}>
+              Tickets
+            </a>
+          )}
+          <button onClick={() => onSave(event.id)}
+            className={`btn btn-sm ${saved ? 'btn-outline' : 'btn-ghost'}`}
+            style={{ fontSize: '0.85rem', padding: '0.3rem 0.5rem' }}>
+            {saved ? '\u2764\uFE0F' : '\u2661'}
+          </button>
         </div>
       </div>
     </motion.div>

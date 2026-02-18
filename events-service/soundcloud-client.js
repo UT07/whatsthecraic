@@ -1,10 +1,13 @@
 const axios = require('axios');
 
-const SOUNDCLOUD_API = 'https://api-v2.soundcloud.com';
+const SOUNDCLOUD_API = 'https://api.soundcloud.com';
+const SOUNDCLOUD_OAUTH_URL = 'https://secure.soundcloud.com/oauth/token';
 const http = axios.create({ timeout: 10000 });
 
 const cache = new Map();
 const inFlight = new Map();
+let cachedAccessToken = null;
+let accessTokenExpiresAt = 0;
 const CACHE_TTL_MS = Number.parseInt(process.env.SOUNDCLOUD_CACHE_TTL_MS || `${12 * 60 * 60 * 1000}`, 10);
 const CACHE_STALE_MS = Number.parseInt(process.env.SOUNDCLOUD_CACHE_STALE_MS || `${30 * 60 * 1000}`, 10);
 const RATE_LIMIT_BACKOFF_MS = Number.parseInt(process.env.SOUNDCLOUD_RATE_LIMIT_BACKOFF_MS || '60000', 10);
@@ -39,7 +42,7 @@ const parseRetryAfterMs = (value) => {
 
 const isRetryableError = (err) => {
   const status = Number(err?.response?.status || 0);
-  if (status === 429 || status >= 500) return true;
+  if (status === 401 || status === 429 || status >= 500) return true;
   return ['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN'].includes(err?.code);
 };
 
@@ -49,6 +52,10 @@ const requestWithRetry = async (fn, label) => {
     try {
       return await fn();
     } catch (err) {
+      if (Number(err?.response?.status || 0) === 401) {
+        cachedAccessToken = null;
+        accessTokenExpiresAt = 0;
+      }
       if (!isRetryableError(err) || attempt >= RETRY_ATTEMPTS) {
         throw err;
       }
@@ -71,6 +78,33 @@ const cleanupCache = () => {
       cache.delete(entryKey);
     }
   }
+};
+
+const getAccessToken = async (clientId, clientSecret) => {
+  if (!clientId || !clientSecret) return null;
+  if (cachedAccessToken && Date.now() < accessTokenExpiresAt - 60000) {
+    return cachedAccessToken;
+  }
+
+  const response = await requestWithRetry(
+    () => http.post(
+      SOUNDCLOUD_OAUTH_URL,
+      new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        auth: { username: clientId, password: clientSecret }
+      }
+    ),
+    'oauth-token'
+  );
+
+  const token = response?.data?.access_token;
+  const expiresIn = Number(response?.data?.expires_in || 3600);
+  if (!token) return null;
+
+  cachedAccessToken = token;
+  accessTokenExpiresAt = Date.now() + (expiresIn * 1000);
+  return cachedAccessToken;
 };
 
 const withCache = async (key, fn) => {
@@ -150,30 +184,38 @@ const extractGenreTokens = (user) => {
  * Search SoundCloud users by query.
  * @returns {Promise<Array<{name:string,username:string,url:string,image:string,genres:string[],followers:number,popularity:number,source:string}>>}
  */
-const searchUsers = async (clientId, query, limit = 20) => {
-  if (!clientId) return [];
+const searchUsers = async (clientId, clientSecret, query, limit = 20) => {
+  if (!clientId || !clientSecret) return [];
   const searchQuery = (query || '').toString().trim();
   if (!searchQuery) return [];
 
   const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), 50);
-  const cacheKey = `soundcloud:users:${normalizeToken(searchQuery)}:${safeLimit}`;
+  const cacheKey = `soundcloud:users:v2:${normalizeToken(searchQuery)}:${safeLimit}`;
 
   return withCache(cacheKey, async () => {
     const response = await requestWithRetry(
-      () => http.get(`${SOUNDCLOUD_API}/search/users`, {
-        params: {
-          q: searchQuery,
-          client_id: clientId,
-          limit: safeLimit,
-          linked_partitioning: 1
-        }
-      }),
+      async () => {
+        const accessToken = await getAccessToken(clientId, clientSecret);
+        if (!accessToken) return { data: [] };
+        return http.get(`${SOUNDCLOUD_API}/users`, {
+          params: {
+            q: searchQuery,
+            limit: safeLimit
+          },
+          headers: {
+            Accept: 'application/json',
+            Authorization: `OAuth ${accessToken}`
+          }
+        });
+      },
       `search-users:${normalizeToken(searchQuery)}`
     );
 
-    const collection = Array.isArray(response.data?.collection) ? response.data.collection : [];
+    const users = Array.isArray(response.data)
+      ? response.data
+      : (Array.isArray(response.data?.collection) ? response.data.collection : []);
 
-    return collection
+    return users
       .map((user) => {
         const displayName = user?.full_name || user?.username || null;
         if (!displayName) return null;
