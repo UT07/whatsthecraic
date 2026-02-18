@@ -68,7 +68,7 @@ const dedupeSources = (sources) => {
     if (!source) return;
     const key = typeof source === 'string'
       ? normalizeToken(source)
-      : `${normalizeToken(source.source)}:${normalizeToken(source.source_id)}`;
+      : normalizeToken(source.source);
     if (!key || seen.has(key)) return;
     seen.add(key);
     out.push(source);

@@ -98,8 +98,9 @@ export const getImageSrcSet = (images) => {
 // Request queue to prevent rate limiting
 const requestQueue = {
   queue: [],
-  processing: false,
-  delay: 450, // spread API calls to avoid 429 bursts
+  active: 0,
+  maxConcurrent: 3,
+  delay: 160, // spread API calls to avoid 429 bursts while keeping UI responsive
 
   add(fn) {
     return new Promise((resolve, reject) => {
@@ -108,24 +109,19 @@ const requestQueue = {
     });
   },
 
-  async process() {
-    if (this.processing || this.queue.length === 0) return;
-
-    this.processing = true;
-    const { fn, resolve, reject } = this.queue.shift();
-
-    try {
-      const result = await fn();
-      resolve(result);
-    } catch (error) {
-      reject(error);
+  process() {
+    while (this.active < this.maxConcurrent && this.queue.length > 0) {
+      const { fn, resolve, reject } = this.queue.shift();
+      this.active += 1;
+      Promise.resolve()
+        .then(fn)
+        .then(resolve)
+        .catch(reject)
+        .finally(() => {
+          this.active -= 1;
+          setTimeout(() => this.process(), this.delay);
+        });
     }
-
-    // Wait before processing next request
-    setTimeout(() => {
-      this.processing = false;
-      this.process();
-    }, this.delay);
   }
 };
 
@@ -288,7 +284,7 @@ const toBestSoundcloudAvatar = (url) => {
   if (!url) return null;
   const value = url.toString();
   return value.includes('-large.')
-    ? value.replace('-large.', '-t500x500.')
+    ? value.replace('-large.', '-t300x300.')
     : value;
 };
 
@@ -299,6 +295,8 @@ const toBestSoundcloudAvatar = (url) => {
 export const fetchSoundCloudImageFromUrl = async (soundcloudUrl) => {
   const profileUrl = normalizeSoundcloudProfileUrl(soundcloudUrl);
   if (!profileUrl) return null;
+  const [, username = ''] = profileUrl.split('soundcloud.com/');
+  const usernameQuery = username.trim();
 
   const cacheKey = `img_soundcloud_url_${profileUrl.toLowerCase()}`;
   const cached = imageCacheStrategy(cacheKey);
@@ -307,6 +305,35 @@ export const fetchSoundCloudImageFromUrl = async (soundcloudUrl) => {
 
   return requestQueue.add(async () => {
     try {
+      const apiBase = process.env.REACT_APP_API_BASE || 'https://api.whatsthecraic.run.place';
+      if (usernameQuery) {
+        const searchResponse = await fetch(
+          `${apiBase}/v1/performers?q=${encodeURIComponent(usernameQuery)}&include=soundcloud&limit=8`
+        );
+        if (searchResponse.ok) {
+          const data = await searchResponse.json();
+          const performers = Array.isArray(data?.performers) ? data.performers : [];
+          const normalizedProfile = profileUrl.toLowerCase();
+          const best = performers.find((performer) => {
+            const candidate = (performer?.soundcloud || performer?.soundcloudUrl || performer?.url || '').toLowerCase();
+            return candidate && (candidate.includes(normalizedProfile) || normalizedProfile.includes(candidate));
+          }) || performers
+            .map((performer) => ({
+              performer,
+              score: scoreArtistNameMatch(usernameQuery, performer?.username || performer?.name),
+              hasImage: performer?.image && !isLikelyPlaceholderImage(performer.image)
+            }))
+            .filter((row) => row.hasImage)
+            .sort((a, b) => b.score - a.score)[0]?.performer;
+
+          const imageUrl = toBestSoundcloudAvatar(best?.image || null);
+          if (imageUrl && !isLikelyPlaceholderImage(imageUrl)) {
+            imageCacheStrategy(cacheKey, imageUrl);
+            return imageUrl;
+          }
+        }
+      }
+
       const response = await fetch(
         `https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(profileUrl)}`
       );
@@ -345,7 +372,7 @@ export const fetchSoundCloudArtistImage = async (artistName) => {
   return requestQueue.add(async () => {
     try {
       const response = await fetch(
-        `${process.env.REACT_APP_API_BASE || 'https://api.whatsthecraic.run.place'}/v1/performers?q=${encodeURIComponent(artistName)}&include=soundcloud&limit=5`
+        `${process.env.REACT_APP_API_BASE || 'https://api.whatsthecraic.run.place'}/v1/performers?q=${encodeURIComponent(artistName)}&include=soundcloud&limit=3`
       );
 
       if (!response.ok) return null;

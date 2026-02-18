@@ -743,6 +743,23 @@ const dedupeList = (items) => {
   return result;
 };
 
+const dedupeSourceEntries = (sources) => {
+  const bySource = new Map();
+  (Array.isArray(sources) ? sources : []).forEach((entry) => {
+    if (!entry) return;
+    if (typeof entry === 'string') {
+      const source = normalizeToken(entry);
+      if (!source || bySource.has(source)) return;
+      bySource.set(source, { source });
+      return;
+    }
+    const source = normalizeToken(entry.source);
+    if (!source || bySource.has(source)) return;
+    bySource.set(source, entry.source_id ? { source: entry.source, source_id: entry.source_id } : { source: entry.source });
+  });
+  return Array.from(bySource.values());
+};
+
 const normalizeTokenList = (value) => {
   if (Array.isArray(value)) {
     return value.map(normalizeToken).filter(Boolean);
@@ -935,8 +952,9 @@ const tokenizeSearchQuery = (value) => {
 
 const SOUNDCLOUD_SIGNAL_CACHE_TTL_MS = Number.parseInt(process.env.SOUNDCLOUD_SIGNAL_TTL_MS || '21600000', 10);
 const soundcloudSignalCache = new Map();
-const PERFORMERS_CACHE_TTL_MS = Number.parseInt(process.env.PERFORMERS_CACHE_TTL_MS || '120000', 10);
+const PERFORMERS_CACHE_TTL_MS = Number.parseInt(process.env.PERFORMERS_CACHE_TTL_MS || '600000', 10);
 const PERFORMERS_CACHE_MAX = Number.parseInt(process.env.PERFORMERS_CACHE_MAX || '750', 10);
+const MIXCLOUD_CLOUDCAST_LOOKUP_LIMIT = Number.parseInt(process.env.MIXCLOUD_CLOUDCAST_LOOKUP_LIMIT || '6', 10);
 const performersResponseCache = new Map();
 
 const cleanupPerformersCache = () => {
@@ -1086,7 +1104,7 @@ const buildEventResponse = (row, sources = []) => {
     genres: parseJson(row.genres),
     tags: parseJson(row.tags),
     images: parseJson(row.images),
-    sources
+    sources: dedupeSourceEntries(sources)
   };
 };
 
@@ -1139,13 +1157,7 @@ const dedupeEventPayloads = (events) => {
 
   return Array.from(byKey.values()).map((event) => ({
     ...event,
-    sources: dedupeList((event.sources || []).map((source) =>
-      typeof source === 'string' ? source : `${source.source}:${source.source_id || ''}`
-    ))
-      .map((key) => {
-        const [source, sourceId] = key.split(':');
-        return sourceId ? { source, source_id: sourceId } : { source };
-      })
+    sources: dedupeSourceEntries(event.sources || [])
   }));
 };
 
@@ -2115,27 +2127,40 @@ app.get('/v1/performers', async (req, res) => {
         djs = Array.from(mergedDjs.values()).slice(0, 20);
       }
 
-      for (const dj of djs) {
-        let genres = null;
-        let latestCloudcastUrl = null;
-        try {
-          const casts = await mixcloudClient.getDJCloudcasts(dj.username, 5);
-          latestCloudcastUrl = casts[0]?.url || null;
-          const allTags = casts.flatMap(c => c.tags);
-          const unique = [...new Set(allTags)].slice(0, 5);
-          if (unique.length) genres = unique.join(', ');
-        } catch { /* skip genre extraction on error */ }
+      const lookupCap = Math.max(0, Math.min(MIXCLOUD_CLOUDCAST_LOOKUP_LIMIT, djs.length));
+      const enrichedByUsername = new Map();
+
+      const lookupTasks = djs.slice(0, lookupCap)
+        .filter((dj) => dj?.username)
+        .map(async (dj) => {
+          try {
+            const casts = await mixcloudClient.getDJCloudcasts(dj.username, 5);
+            const latestCloudcastUrl = casts[0]?.url || null;
+            const allTags = casts.flatMap((c) => c.tags || []);
+            const genres = dedupeList(allTags).slice(0, 5).join(', ') || null;
+            enrichedByUsername.set(dj.username, { latestCloudcastUrl, genres });
+          } catch {
+            // Skip enrichment errors and use base profile values.
+          }
+        });
+      if (lookupTasks.length > 0) {
+        await Promise.allSettled(lookupTasks);
+      }
+
+      djs.forEach((dj) => {
+        const enriched = enrichedByUsername.get(dj.username) || {};
+        const latestCloudcastUrl = enriched.latestCloudcastUrl || null;
         performers.push({
           name: dj.name,
           source: 'mixcloud',
           image: dj.image,
-          genres,
+          genres: enriched.genres || null,
           mixcloudUrl: latestCloudcastUrl || dj.url,
           mixcloudProfileUrl: dj.url,
           latestMixcloudUrl: latestCloudcastUrl,
           username: dj.username
         });
-      }
+      });
     } catch (err) {
       console.warn('[performers] Mixcloud search failed:', err.message);
     }

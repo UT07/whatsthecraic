@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import djAPI from '../services/djAPI';
 import eventsAPI from '../services/eventsAPI';
 import { getUser } from '../services/apiClient';
@@ -314,20 +314,43 @@ const DJs = () => {
   const UnifiedArtistCard = ({ artist, index }) => {
     const [artistImage, setArtistImage] = useState(artist.image || null);
     const [loadingImage, setLoadingImage] = useState(false);
+    const [isInView, setIsInView] = useState(Boolean(artist.image));
+    const cardRef = useRef(null);
+
+    useEffect(() => {
+      if (isInView) return;
+      const node = cardRef.current;
+      if (!node || typeof IntersectionObserver === 'undefined') {
+        setIsInView(true);
+        return;
+      }
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            setIsInView(true);
+            observer.disconnect();
+          }
+        },
+        { rootMargin: '240px 0px' }
+      );
+      observer.observe(node);
+      return () => observer.disconnect();
+    }, [isInView]);
 
     useEffect(() => {
       const loadImage = async () => {
-        if (artistImage || loadingImage || !artist.name) return;
+        if (!isInView || artistImage || loadingImage || !artist.name) return;
         setLoadingImage(true);
         const image = await fetchArtistImage(artist.name, { soundcloudUrl: artist.soundcloud });
         if (image) setArtistImage(image);
         setLoadingImage(false);
       };
       loadImage();
-    }, [artist.name, artist.soundcloud, artistImage, loadingImage]);
+    }, [artist.name, artist.soundcloud, artistImage, loadingImage, isInView]);
 
     return (
       <motion.div
+        ref={cardRef}
         key={`${artist.name}-${index}`}
         className="card-artist"
         initial={{ opacity: 0, y: 16 }}
@@ -336,7 +359,7 @@ const DJs = () => {
       >
         <div className="card-artist-img-wrap" style={{ paddingTop: '100%' }}>
           {artistImage ? (
-            <img src={artistImage} alt={artist.name} className="card-artist-img" loading="lazy" />
+            <img src={artistImage} alt={artist.name} className="card-artist-img" loading="lazy" decoding="async" />
           ) : (
             <div style={{
               position: 'absolute', inset: 0,

@@ -157,8 +157,8 @@ const withCache = async (key, fn) => {
 
 const toBestAvatar = (avatarUrl) => {
   if (!avatarUrl) return null;
-  // SoundCloud avatar URLs commonly use -large; upgrade when available.
-  return avatarUrl.replace('-large.', '-t500x500.');
+  // Use medium CDN variants to reduce payload and improve card paint time.
+  return avatarUrl.replace('-large.', '-t300x300.');
 };
 
 const extractGenreTokens = (user) => {

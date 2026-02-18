@@ -26,6 +26,19 @@ const toMatchPercent = (score) => {
   return Math.round((1 - Math.exp(-value / 6)) * 100);
 };
 
+const getEventSourceLabels = (sources) => {
+  const seen = new Set();
+  const labels = [];
+  (Array.isArray(sources) ? sources : []).forEach((entry) => {
+    const label = typeof entry === 'string' ? entry : entry?.source;
+    const normalized = (label || '').toString().trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    labels.push(label);
+  });
+  return labels;
+};
+
 /* ─── MATCH REASON BADGE ─── */
 const MatchBadge = ({ reasons, score }) => {
   if (!reasons && !score) return null;
@@ -207,7 +220,7 @@ const EventCard = ({ event, index, saved, onSave, onHide, token }) => {
           )}
         </div>
         <p style={{ fontSize: '0.68rem', color: 'var(--muted-2)', marginTop: '0.5rem' }}>
-          {(event.sources || []).map(s => s.source).join(' \u00B7 ') || 'local'}
+          {getEventSourceLabels(event.sources).join(' \u00B7 ') || 'local'}
         </p>
       </div>
     </motion.article>
