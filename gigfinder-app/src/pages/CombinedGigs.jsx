@@ -26,6 +26,13 @@ const toMatchPercent = (score) => {
   return Math.round((1 - Math.exp(-value / 6)) * 100);
 };
 
+const normalizeMatchScore = (score) => {
+  const value = Number(score);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (value <= 1) return value;
+  return 1 - Math.exp(-value / 6);
+};
+
 const getEventSourceLabels = (sources) => {
   const seen = new Set();
   const labels = [];
@@ -259,7 +266,17 @@ const CombinedGigs = () => {
     activeFiltersRef.current = activeFilters;
   }, [activeFilters]);
 
-  const groupedEvents = useMemo(() => groupEventsForDisplay(events), [events]);
+  const groupedEvents = useMemo(() => {
+    const grouped = groupEventsForDisplay(events);
+    return [...grouped].sort((a, b) => {
+      const scoreDelta = normalizeMatchScore(b.rank_score) - normalizeMatchScore(a.rank_score);
+      if (Math.abs(scoreDelta) > 1e-9) return scoreDelta;
+      const aStart = new Date(a.start_time || 0).getTime();
+      const bStart = new Date(b.start_time || 0).getTime();
+      if (aStart !== bStart) return aStart - bStart;
+      return (a.title || '').localeCompare(b.title || '');
+    });
+  }, [events]);
   const groupedSavedEvents = useMemo(() => groupEventsForDisplay(savedEvents), [savedEvents]);
   const groupedHiddenEvents = useMemo(() => groupEventsForDisplay(hiddenEvents), [hiddenEvents]);
   const mergedDuplicatesCount = Math.max(0, events.length - groupedEvents.length);
