@@ -345,8 +345,8 @@ class RecommendationEngine:
         if not context or not isinstance(context, dict):
             return set(), set()
 
-        genre_keys = ['spotify_genres', 'soundcloud_genres', 'preferred_genres', 'top_genres']
-        artist_keys = ['spotify_artists', 'soundcloud_artists', 'preferred_artists', 'top_artists']
+        genre_keys = ['spotify_genres', 'soundcloud_genres', 'youtube_genres', 'preferred_genres', 'top_genres']
+        artist_keys = ['spotify_artists', 'soundcloud_artists', 'youtube_artists', 'preferred_artists', 'top_artists']
 
         genre_tokens: Set[str] = set()
         for key in genre_keys:

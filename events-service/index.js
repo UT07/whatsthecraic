@@ -18,6 +18,7 @@ const rateLimit = require('express-rate-limit');
 const spotifyClient = require('./spotify-client');
 const mixcloudClient = require('./mixcloud-client');
 const soundcloudClient = require('./soundcloud-client');
+const youtubeClient = require('./youtube-client');
 
 // Adjust these env vars / defaults as needed
 const DB_HOST = process.env.DB_HOST || 'db';
@@ -55,6 +56,8 @@ const BANDSINTOWN_USER_SYNC_HOURS = Number.parseInt(process.env.BANDSINTOWN_USER
 const BANDSINTOWN_USER_MAX_ARTISTS = Number.parseInt(process.env.BANDSINTOWN_USER_MAX_ARTISTS || '10', 10);
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || null;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || null;
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || null;
+const YOUTUBE_ENABLED = (process.env.YOUTUBE_ENABLED || 'true') === 'true';
 const MIXCLOUD_ENABLED = (process.env.MIXCLOUD_ENABLED || 'true') === 'true';
 const SOUNDCLOUD_CLIENT_ID = process.env.SOUNDCLOUD_CLIENT_ID || null;
 const SOUNDCLOUD_CLIENT_SECRET = process.env.SOUNDCLOUD_CLIENT_SECRET || null;
@@ -74,6 +77,9 @@ const warnOnMissingEnv = () => {
   if (BANDSINTOWN_APP_ID === null) warnings.push('BANDSINTOWN_APP_ID not set');
   if (SOUNDCLOUD_ENABLED && (!SOUNDCLOUD_CLIENT_ID || !SOUNDCLOUD_CLIENT_SECRET)) {
     warnings.push('Make sure your runtime secrets include SOUNDCLOUD_CLIENT_ID/SOUNDCLOUD_CLIENT_SECRET; otherwise SoundCloud enrichment/image coverage will stay limited.');
+  }
+  if (YOUTUBE_ENABLED && !YOUTUBE_API_KEY) {
+    warnings.push('YOUTUBE_ENABLED but YOUTUBE_API_KEY not set');
   }
 
   const messages = [];
@@ -1001,13 +1007,15 @@ const buildPerformerSearchQuery = (signals, fallback = 'live dj set electronic h
   const artists = dedupeList([
     ...(signals?.preferredArtists || []),
     ...(signals?.spotifyArtists || []),
-    ...(signals?.soundcloudArtists || [])
+    ...(signals?.soundcloudArtists || []),
+    ...(signals?.youtubeArtists || [])
   ]).slice(0, 2);
 
   const genres = dedupeList([
     ...(signals?.preferredGenres || []),
     ...(signals?.spotifyGenres || []),
-    ...(signals?.soundcloudGenres || [])
+    ...(signals?.soundcloudGenres || []),
+    ...(signals?.youtubeGenres || [])
   ]).slice(0, 4);
 
   const tokens = [...artists, ...genres]
@@ -1038,6 +1046,21 @@ const PERFORMERS_CACHE_TTL_MS = Number.parseInt(process.env.PERFORMERS_CACHE_TTL
 const PERFORMERS_CACHE_MAX = Number.parseInt(process.env.PERFORMERS_CACHE_MAX || '750', 10);
 const MIXCLOUD_CLOUDCAST_LOOKUP_LIMIT = Number.parseInt(process.env.MIXCLOUD_CLOUDCAST_LOOKUP_LIMIT || '6', 10);
 const performersResponseCache = new Map();
+const YOUTUBE_LABEL_KEYWORDS = [
+  'records',
+  'recordings',
+  'record label',
+  'label',
+  'club',
+  'venue',
+  'radio',
+  'festival',
+  'events',
+  'promotions',
+  'agency',
+  'collective',
+  'booking'
+];
 
 const cleanupPerformersCache = () => {
   if (performersResponseCache.size <= PERFORMERS_CACHE_MAX) return;
@@ -1243,6 +1266,18 @@ const dedupeEventPayloads = (events) => {
   }));
 };
 
+const queryOptionalRows = async (statement, params = []) => {
+  try {
+    const [rows] = await pool.query(statement, params);
+    return rows;
+  } catch (err) {
+    if (err?.code === 'ER_NO_SUCH_TABLE' || err?.code === 'ER_BAD_FIELD_ERROR') {
+      return [];
+    }
+    throw err;
+  }
+};
+
 const getUserSignals = async (userId) => {
   const [prefRows] = await pool.query(
     `SELECT preferred_genres, preferred_artists, preferred_cities, preferred_venues,
@@ -1256,6 +1291,10 @@ const getUserSignals = async (userId) => {
   );
   const [soundcloudRows] = await pool.query(
     'SELECT top_genres, top_artists FROM user_soundcloud WHERE user_id = ?',
+    [userId]
+  );
+  const youtubeRows = await queryOptionalRows(
+    'SELECT top_genres, top_artists FROM user_youtube WHERE user_id = ?',
     [userId]
   );
 
@@ -1277,13 +1316,19 @@ const getUserSignals = async (userId) => {
   const spotifyArtistsRaw = spotifyRows.length ? parseJson(spotifyRows[0].top_artists) : [];
   const soundcloudGenresRaw = soundcloudRows.length ? parseJson(soundcloudRows[0].top_genres) : [];
   const soundcloudArtistsRaw = soundcloudRows.length ? parseJson(soundcloudRows[0].top_artists) : [];
+  const youtubeGenresRaw = youtubeRows.length ? parseJson(youtubeRows[0].top_genres) : [];
+  const youtubeArtistsRaw = youtubeRows.length ? parseJson(youtubeRows[0].top_artists) : [];
   const spotifyArtistNames = extractNameList(spotifyArtistsRaw);
   const soundcloudArtistNames = extractNameList(soundcloudArtistsRaw);
+  const youtubeArtistNames = extractNameList(youtubeArtistsRaw);
   const spotifyGenres = Array.isArray(spotifyGenresRaw)
     ? extractGenreList(spotifyGenresRaw).map(item => normalizeToken(item)).filter(Boolean)
     : [];
   const soundcloudGenresFromProfile = Array.isArray(soundcloudGenresRaw)
     ? extractGenreList(soundcloudGenresRaw).map(item => normalizeToken(item)).filter(Boolean)
+    : [];
+  const youtubeGenres = Array.isArray(youtubeGenresRaw)
+    ? extractGenreList(youtubeGenresRaw).map(item => normalizeToken(item)).filter(Boolean)
     : [];
   const spotifyArtists = spotifyArtistNames
     .map(item => normalizeToken(item))
@@ -1291,10 +1336,14 @@ const getUserSignals = async (userId) => {
   const soundcloudArtistsFromProfile = soundcloudArtistNames
     .map(item => normalizeToken(item))
     .filter(Boolean);
+  const youtubeArtists = youtubeArtistNames
+    .map(item => normalizeToken(item))
+    .filter(Boolean);
   const soundcloudSignals = await getSoundcloudTasteSignals([
     ...spotifyArtistNames,
     ...preferredArtistNames,
-    ...soundcloudArtistNames
+    ...soundcloudArtistNames,
+    ...youtubeArtistNames
   ]);
 
   const [savedRows] = await pool.query(
@@ -1350,6 +1399,8 @@ const getUserSignals = async (userId) => {
       ...soundcloudArtistsFromProfile,
       ...(soundcloudSignals.soundcloudArtists || [])
     ]).map(normalizeToken).filter(Boolean),
+    youtubeGenres: dedupeList(youtubeGenres).map(normalizeToken).filter(Boolean),
+    youtubeArtists: dedupeList(youtubeArtists).map(normalizeToken).filter(Boolean),
     savedGenres: Array.from(savedGenres),
     savedCities: Array.from(savedCities),
     savedVenues: Array.from(savedVenues),
@@ -1442,6 +1493,12 @@ const scoreEventRow = (row, signals) => {
     reasons.push({ type: 'soundcloud_genre', values: soundcloudGenreMatches.slice(0, 3) });
   }
 
+  const youtubeGenreMatches = expandedEventGenres.filter(g => (signals.youtubeGenres || []).includes(g));
+  if (youtubeGenreMatches.length > 0) {
+    score += Math.min(youtubeGenreMatches.length, 5) * 2;
+    reasons.push({ type: 'youtube_genre', values: youtubeGenreMatches.slice(0, 3) });
+  }
+
   const artistMatches = signals.preferredArtists.filter(artist =>
     artist && (title.includes(artist) || description.includes(artist))
   );
@@ -1464,6 +1521,14 @@ const scoreEventRow = (row, signals) => {
   if (soundcloudArtistMatches.length > 0) {
     score += soundcloudArtistMatches.length * 4;
     reasons.push({ type: 'soundcloud_artist', values: soundcloudArtistMatches.slice(0, 3) });
+  }
+
+  const youtubeArtistMatches = (signals.youtubeArtists || []).filter(artist =>
+    artist && (title.includes(artist) || description.includes(artist))
+  );
+  if (youtubeArtistMatches.length > 0) {
+    score += youtubeArtistMatches.length * 4;
+    reasons.push({ type: 'youtube_artist', values: youtubeArtistMatches.slice(0, 3) });
   }
 
   const venueName = normalizeToken(row.venue_name);
@@ -1571,10 +1636,12 @@ const RANK_REASON_MAP = {
   preferred_genre: 'genre_match',
   spotify_genre: 'genre_match',
   soundcloud_genre: 'genre_match',
+  youtube_genre: 'genre_match',
   saved_genre: 'genre_match',
   preferred_artist: 'artist_match',
   spotify_artist: 'artist_match',
   soundcloud_artist: 'artist_match',
+  youtube_artist: 'artist_match',
   preferred_dj: 'artist_match',
   saved_title: 'artist_match',
   preferred_venue: 'venue_match',
@@ -1632,6 +1699,12 @@ const mergePerformer = (existing, incoming) => {
   if (!merged.city && incoming.city) merged.city = incoming.city;
   if (!merged.spotifyUrl && incoming.spotifyUrl) merged.spotifyUrl = incoming.spotifyUrl;
   if (!merged.mixcloudUrl && incoming.mixcloudUrl) merged.mixcloudUrl = incoming.mixcloudUrl;
+  if (!merged.youtubeUrl && incoming.youtubeUrl) merged.youtubeUrl = incoming.youtubeUrl;
+  if (!merged.latestYoutubeUrl && incoming.latestYoutubeUrl) merged.latestYoutubeUrl = incoming.latestYoutubeUrl;
+  if (!merged.youtubeVideoId && incoming.youtubeVideoId) merged.youtubeVideoId = incoming.youtubeVideoId;
+  if (!merged.youtubeChannelUrl && incoming.youtubeChannelUrl) merged.youtubeChannelUrl = incoming.youtubeChannelUrl;
+  if (!merged.youtubeChannelId && incoming.youtubeChannelId) merged.youtubeChannelId = incoming.youtubeChannelId;
+  if (!merged.youtubeChannelType && incoming.youtubeChannelType) merged.youtubeChannelType = incoming.youtubeChannelType;
   if (!merged.instagram && incoming.instagram) merged.instagram = incoming.instagram;
   if (!merged.soundcloud && incoming.soundcloud) merged.soundcloud = incoming.soundcloud;
   if (!merged.currency && incoming.currency) merged.currency = incoming.currency;
@@ -1655,12 +1728,14 @@ const scorePerformer = (performer, signals, keyword = '') => {
   const preferredGenres = new Set([
     ...(signals.preferredGenres || []),
     ...(signals.spotifyGenres || []),
-    ...(signals.soundcloudGenres || [])
+    ...(signals.soundcloudGenres || []),
+    ...(signals.youtubeGenres || [])
   ].filter(Boolean));
   const preferredArtists = dedupeList([
     ...(signals.preferredArtists || []),
     ...(signals.spotifyArtists || []),
-    ...(signals.soundcloudArtists || [])
+    ...(signals.soundcloudArtists || []),
+    ...(signals.youtubeArtists || [])
   ].filter(Boolean));
 
   const artistMatches = preferredArtists.filter(artist =>
@@ -1695,6 +1770,16 @@ const scorePerformer = (performer, signals, keyword = '') => {
     score: normalized,
     reasons: dedupeList(reasons)
   };
+};
+
+const looksLikeYoutubeOrganization = (item) => {
+  if (!item) return false;
+  const explicitType = normalizeToken(item.channelType || item.youtubeChannelType || '');
+  if (explicitType === 'organization') return true;
+  if (explicitType === 'artist') return false;
+  const name = normalizeToken(item.name);
+  if (!name) return false;
+  return YOUTUBE_LABEL_KEYWORDS.some((keyword) => name.includes(keyword));
 };
 
 const hydratePlan = (row) => {
@@ -2192,6 +2277,31 @@ app.get('/v1/performers', async (req, res) => {
     }
   }
 
+  if (includeSet.has('youtube') && YOUTUBE_ENABLED && YOUTUBE_API_KEY) {
+    try {
+      const searchQuery = tasteQuery;
+      const channels = await youtubeClient.searchArtistsAndVideos(YOUTUBE_API_KEY, searchQuery, 24);
+      channels.forEach((channel) => {
+        performers.push({
+          name: channel.name,
+          source: 'youtube',
+          image: channel.image || null,
+          genres: Array.isArray(channel.genres) && channel.genres.length > 0 ? channel.genres.join(', ') : null,
+          popularity: Number(channel.popularity || 0) || null,
+          followers: Number(channel.followers || 0) || null,
+          youtubeUrl: channel.youtubeUrl || null,
+          latestYoutubeUrl: channel.latestYoutubeUrl || null,
+          youtubeVideoId: channel.youtubeVideoId || null,
+          youtubeChannelId: channel.youtubeChannelId || null,
+          youtubeChannelUrl: channel.youtubeChannelUrl || channel.youtubeCustomUrl || null,
+          youtubeChannelType: channel.channelType || (looksLikeYoutubeOrganization(channel) ? 'organization' : 'artist')
+        });
+      });
+    } catch (err) {
+      console.warn('[performers] YouTube search failed:', err.message);
+    }
+  }
+
   if (includeSet.has('mixcloud') && MIXCLOUD_ENABLED) {
     try {
       const searchQuery = tasteQuery;
@@ -2260,7 +2370,7 @@ app.get('/v1/performers', async (req, res) => {
     const matchesKeyword = keywordTokens.length === 0
       || keywordTokens.some((token) => searchableText.includes(token));
     const sourceToken = normalizeToken(item.source);
-    const isGlobalSource = sourceToken === 'mixcloud' || sourceToken === 'soundcloud' || sourceToken === 'spotify';
+    const isGlobalSource = sourceToken === 'mixcloud' || sourceToken === 'soundcloud' || sourceToken === 'spotify' || sourceToken === 'youtube';
     const matchesCity = !cityToken
       || normalizeToken(item.city).includes(cityToken)
       || isGlobalSource;
@@ -2283,6 +2393,7 @@ app.get('/v1/performers', async (req, res) => {
   let deduped = Array.from(mergedByName.values()).map(item => ({
     ...item,
     sources: dedupeList(item.sources || []),
+    is_youtube_org: looksLikeYoutubeOrganization(item),
     source_count: (item.sources || []).length
   }));
 

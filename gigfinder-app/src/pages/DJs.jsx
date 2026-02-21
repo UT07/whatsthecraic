@@ -21,7 +21,7 @@ const splitGenres = (value) => {
     .filter(Boolean);
 };
 
-const computeArtistRelevance = (artist, spotifyProfile, soundcloudProfile, filters) => {
+const computeArtistRelevance = (artist, spotifyProfile, soundcloudProfile, youtubeProfile, filters) => {
   const spotifyArtists = (spotifyProfile?.top_artists || [])
     .map(item => normalizeToken(typeof item === 'string' ? item : item?.name))
     .filter(Boolean);
@@ -34,8 +34,15 @@ const computeArtistRelevance = (artist, spotifyProfile, soundcloudProfile, filte
   const soundcloudGenres = (soundcloudProfile?.top_genres || [])
     .map(item => normalizeToken(typeof item === 'string' ? item : item?.genre))
     .filter(Boolean);
+  const youtubeArtists = (youtubeProfile?.top_artists || [])
+    .map(item => normalizeToken(typeof item === 'string' ? item : item?.name))
+    .filter(Boolean);
+  const youtubeGenres = (youtubeProfile?.top_genres || [])
+    .map(item => normalizeToken(typeof item === 'string' ? item : item?.genre))
+    .filter(Boolean);
   const spotifyGenreSet = new Set(spotifyGenres);
   const soundcloudGenreSet = new Set(soundcloudGenres);
+  const youtubeGenreSet = new Set(youtubeGenres);
 
   let raw = 0;
   const reasons = [];
@@ -55,6 +62,13 @@ const computeArtistRelevance = (artist, spotifyProfile, soundcloudProfile, filte
     raw += Math.min(soundcloudArtistMatches.length, 3) * 4;
     reasons.push('soundcloud artist');
   }
+  const youtubeArtistMatches = youtubeArtists.filter(token =>
+    token && (artistName.includes(token) || token.includes(artistName))
+  );
+  if (youtubeArtistMatches.length > 0) {
+    raw += Math.min(youtubeArtistMatches.length, 3) * 4;
+    reasons.push('youtube artist');
+  }
 
   const genreMatches = (artist.genre_tokens || []).filter(token => spotifyGenreSet.has(token));
   if (genreMatches.length > 0) {
@@ -65,6 +79,11 @@ const computeArtistRelevance = (artist, spotifyProfile, soundcloudProfile, filte
   if (soundcloudGenreMatches.length > 0) {
     raw += Math.min(soundcloudGenreMatches.length, 4) * 2;
     reasons.push('soundcloud genre');
+  }
+  const youtubeGenreMatches = (artist.genre_tokens || []).filter(token => youtubeGenreSet.has(token));
+  if (youtubeGenreMatches.length > 0) {
+    raw += Math.min(youtubeGenreMatches.length, 4) * 2;
+    reasons.push('youtube genre');
   }
 
   const qToken = normalizeToken(filters.q);
@@ -93,6 +112,7 @@ const DJs = () => {
   const [performersLoading, setPerformersLoading] = useState(false);
   const [spotifyProfile, setSpotifyProfile] = useState(null);
   const [soundcloudProfile, setSoundcloudProfile] = useState(null);
+  const [youtubeProfile, setYoutubeProfile] = useState(null);
   const [localOnly, setLocalOnly] = useState(false);
 
   const [filters, setFilters] = useState({ q: '', city: '', genres: '', feeMax: '' });
@@ -121,7 +141,7 @@ const DJs = () => {
       const data = await eventsAPI.getPerformers({
         city: activeFilters.city || undefined,
         q: activeFilters.q || undefined,
-        include: localOnlyOverride ? 'local' : 'local,ticketmaster,spotify,mixcloud,soundcloud',
+        include: localOnlyOverride ? 'local' : 'local,ticketmaster,spotify,mixcloud,soundcloud,youtube',
         limit: 200
       });
       setPerformers(data.performers || []);
@@ -139,10 +159,12 @@ const DJs = () => {
   useEffect(() => {
     Promise.all([
       authAPI.getSpotifyProfile().catch(() => null),
-      authAPI.getSoundCloudProfile().catch(() => null)
-    ]).then(([spotify, soundcloud]) => {
+      authAPI.getSoundCloudProfile().catch(() => null),
+      authAPI.getYouTubeProfile().catch(() => null)
+    ]).then(([spotify, soundcloud, youtube]) => {
       setSpotifyProfile(spotify);
       setSoundcloudProfile(soundcloud);
+      setYoutubeProfile(youtube);
     });
   }, []);
 
@@ -233,6 +255,11 @@ const DJs = () => {
         popularity: Math.max(Number(existing.popularity || 0), Number(incoming.popularity || 0)) || null,
         spotifyUrl: existing.spotifyUrl || incoming.spotifyUrl || null,
         mixcloudUrl: existing.mixcloudUrl || incoming.mixcloudUrl || null,
+        youtubeUrl: existing.youtubeUrl || incoming.youtubeUrl || null,
+        latestYoutubeUrl: existing.latestYoutubeUrl || incoming.latestYoutubeUrl || null,
+        youtubeVideoId: existing.youtubeVideoId || incoming.youtubeVideoId || null,
+        youtubeChannelUrl: existing.youtubeChannelUrl || incoming.youtubeChannelUrl || null,
+        youtubeChannelType: existing.youtubeChannelType || incoming.youtubeChannelType || null,
         instagram: existing.instagram || incoming.instagram || null,
         soundcloud: existing.soundcloud || incoming.soundcloud || null,
         localDj: existing.localDj || incoming.localDj || null,
@@ -282,7 +309,7 @@ const DJs = () => {
         if (cityToken) {
           const cityMatches = normalizeToken(artist.city).includes(cityToken);
           const sourceSet = new Set((artist.sources || []).map((source) => normalizeToken(source)));
-          const isGlobalArtist = sourceSet.has('mixcloud') || sourceSet.has('soundcloud') || sourceSet.has('spotify');
+          const isGlobalArtist = sourceSet.has('mixcloud') || sourceSet.has('soundcloud') || sourceSet.has('spotify') || sourceSet.has('youtube');
           if (!cityMatches && !isGlobalArtist) return false;
         }
         if (genreToken) {
@@ -297,7 +324,13 @@ const DJs = () => {
       })
       .map((artist) => ({
         ...artist,
-        ...computeArtistRelevance(artist, spotifyProfile, soundcloudProfile, filters)
+        ...computeArtistRelevance(artist, spotifyProfile, soundcloudProfile, youtubeProfile, filters),
+        is_youtube_org_only: (() => {
+          const sourceSet = new Set((artist.sources || []).map((source) => normalizeToken(source)));
+          const onlyYoutube = sourceSet.size === 1 && sourceSet.has('youtube');
+          const channelType = normalizeToken(artist.youtubeChannelType);
+          return onlyYoutube && channelType === 'organization';
+        })()
       }))
       .sort((a, b) => {
         if (b.relevance_score !== a.relevance_score) return b.relevance_score - a.relevance_score;
@@ -309,7 +342,17 @@ const DJs = () => {
         }
         return (a.name || '').localeCompare(b.name || '');
       });
-  }, [djs, performers, spotifyProfile, soundcloudProfile, filters, localOnly]);
+  }, [djs, performers, spotifyProfile, soundcloudProfile, youtubeProfile, filters, localOnly]);
+
+  const artistFocusedResults = useMemo(
+    () => unifiedArtists.filter((artist) => !artist.is_youtube_org_only),
+    [unifiedArtists]
+  );
+
+  const youtubeOrgResults = useMemo(
+    () => unifiedArtists.filter((artist) => artist.is_youtube_org_only),
+    [unifiedArtists]
+  );
 
   const UnifiedArtistCard = ({ artist, index }) => {
     const [artistImage, setArtistImage] = useState(artist.soundcloud ? null : (artist.image || null));
@@ -421,6 +464,17 @@ const DJs = () => {
                 Mixcloud ↗
               </a>
             )}
+            {(artist.latestYoutubeUrl || artist.youtubeUrl || artist.youtubeChannelUrl) && (
+              <a
+                href={artist.latestYoutubeUrl || artist.youtubeUrl || artist.youtubeChannelUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="chip"
+                style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', background: 'rgba(255,84,84,0.15)', borderColor: '#ff5454', color: '#ff5454', textDecoration: 'none' }}
+              >
+                YouTube ↗
+              </a>
+            )}
             {artist.soundcloud && (
               <a href={artist.soundcloud} target="_blank" rel="noopener noreferrer"
                 className="chip"
@@ -462,7 +516,7 @@ const DJs = () => {
           <p className="section-subtitle">
             {localOnly
               ? 'Showing only local DB artists from Ireland.'
-              : 'Unified artists across local DB + external APIs, ranked by your Spotify + SoundCloud taste'}
+              : 'Unified artists across local DB + external APIs, ranked by your Spotify + SoundCloud + YouTube taste'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -507,7 +561,7 @@ const DJs = () => {
               <div key={i} className="skeleton" style={{ height: 320, borderRadius: 14 }} />
             ))}
           </div>
-        ) : unifiedArtists.length === 0 ? (
+        ) : artistFocusedResults.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
             <p style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.3rem' }}>No artists found</p>
             <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
@@ -517,12 +571,26 @@ const DJs = () => {
           </div>
         ) : (
           <div className="grid-events" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
-            {unifiedArtists.map((artist, index) => (
+            {artistFocusedResults.map((artist, index) => (
               <UnifiedArtistCard key={`${artist.name}-${index}`} artist={artist} index={index} />
             ))}
           </div>
         )}
       </section>
+
+      {!localOnly && youtubeOrgResults.length > 0 && (
+        <section className="space-y-4">
+          <div className="section-header">
+            <h2 className="section-header-title">YouTube labels & clubs</h2>
+            <span className="chip" style={{ fontSize: '0.68rem', padding: '0.25rem 0.55rem' }}>{youtubeOrgResults.length} channels</span>
+          </div>
+          <div className="grid-events" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+            {youtubeOrgResults.slice(0, 24).map((artist, index) => (
+              <UnifiedArtistCard key={`yt-org-${artist.name}-${index}`} artist={artist} index={index} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Modal */}
       {modalOpen && (

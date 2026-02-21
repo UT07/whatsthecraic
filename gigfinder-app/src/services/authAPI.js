@@ -13,6 +13,10 @@ const authAPI = {
     const response = await authClient.get('/auth/spotify/status');
     return response.data;
   },
+  connectSpotify: async (payload) => {
+    const response = await authClient.post('/auth/spotify/connect', payload);
+    return response.data;
+  },
   syncSpotify: async () => {
     const response = await authClient.post('/auth/spotify/sync');
     return response.data;
@@ -39,6 +43,26 @@ const authAPI = {
   },
   disconnectSoundCloud: async () => {
     const response = await authClient.delete('/auth/soundcloud/disconnect');
+    return response.data;
+  },
+  getYouTubeStatus: async () => {
+    const response = await authClient.get('/auth/youtube/status');
+    return response.data;
+  },
+  connectYouTube: async (payload) => {
+    const response = await authClient.post('/auth/youtube/connect', payload);
+    return response.data;
+  },
+  syncYouTube: async () => {
+    const response = await authClient.post('/auth/youtube/sync');
+    return response.data;
+  },
+  getYouTubeProfile: async () => {
+    const response = await authClient.get('/auth/youtube/profile');
+    return response.data;
+  },
+  disconnectYouTube: async () => {
+    const response = await authClient.delete('/auth/youtube/disconnect');
     return response.data;
   },
   getPreferences: async () => {

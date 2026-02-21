@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Radar, Bar, Doughnut } from 'react-chartjs-2';
+import { Radar, Bar, Doughnut, PolarArea } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   RadialLinearScale,
@@ -60,6 +60,7 @@ const normalizePercent = (value, max) => {
 const TasteProfilePanel = ({ reloadToken = '' }) => {
   const [spotifyProfile, setSpotifyProfile] = useState(null);
   const [soundcloudProfile, setSoundcloudProfile] = useState(null);
+  const [youtubeProfile, setYoutubeProfile] = useState(null);
   const [savedEvents, setSavedEvents] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -67,13 +68,15 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [spotifyData, soundcloudData, saved] = await Promise.all([
+        const [spotifyData, soundcloudData, youtubeData, saved] = await Promise.all([
           authAPI.getSpotifyProfile().catch(() => null),
           authAPI.getSoundCloudProfile().catch(() => null),
+          authAPI.getYouTubeProfile().catch(() => null),
           eventsAPI.getSavedEvents().catch(() => [])
         ]);
         setSpotifyProfile(spotifyData);
         setSoundcloudProfile(soundcloudData);
+        setYoutubeProfile(youtubeData);
         setSavedEvents(Array.isArray(saved) ? saved : saved?.events || []);
       } catch (error) {
         console.error('Taste profile load error:', error);
@@ -94,6 +97,7 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
 
   const spotifyGenreMap = toGenreCountMap(spotifyProfile?.top_genres || []);
   const soundcloudGenreMap = toGenreCountMap(soundcloudProfile?.top_genres || []);
+  const youtubeGenreMap = toGenreCountMap(youtubeProfile?.top_genres || []);
   const savedGenreMap = (() => {
     const map = new Map();
     savedEvents.forEach((event) => {
@@ -116,6 +120,9 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
     soundcloudGenreMap.forEach((value, genre) => {
       map.set(genre, (map.get(genre) || 0) + (value * streamingWeight));
     });
+    youtubeGenreMap.forEach((value, genre) => {
+      map.set(genre, (map.get(genre) || 0) + (value * streamingWeight));
+    });
     savedGenreMap.forEach((value, genre) => {
       map.set(genre, (map.get(genre) || 0) + value);
     });
@@ -124,7 +131,7 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
 
   const topGenres = Array.from(combinedGenreMap.entries())
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
+    .slice(0, 10)
     .map(([genre, count]) => ({ genre, count }));
 
   if (topGenres.length === 0) {
@@ -159,7 +166,7 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
           Build your taste profile
         </h3>
         <p style={{ fontSize: '0.85rem', color: '#a0a0a0', marginBottom: '1.25rem' }}>
-          Connect Spotify or SoundCloud and save events to see your musical preferences visualized
+          Connect Spotify, SoundCloud, or YouTube and save events to see your musical preferences visualized
         </p>
       </motion.div>
     );
@@ -234,6 +241,7 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
   const compareLabels = topGenres.slice(0, 6).map((item) => item.genre);
   const spotifyMax = Math.max(sumMapValues(spotifyGenreMap) > 0 ? Math.max(...Array.from(spotifyGenreMap.values())) : 0, 1);
   const soundcloudMax = Math.max(sumMapValues(soundcloudGenreMap) > 0 ? Math.max(...Array.from(soundcloudGenreMap.values())) : 0, 1);
+  const youtubeMax = Math.max(sumMapValues(youtubeGenreMap) > 0 ? Math.max(...Array.from(youtubeGenreMap.values())) : 0, 1);
   const compareData = {
     labels: compareLabels,
     datasets: [
@@ -249,6 +257,13 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
         data: compareLabels.map((genre) => normalizePercent(soundcloudGenreMap.get(genre), soundcloudMax)),
         backgroundColor: 'rgba(255,140,66,0.45)',
         borderColor: '#ff8c42',
+        borderWidth: 1
+      },
+      {
+        label: 'YouTube',
+        data: compareLabels.map((genre) => normalizePercent(youtubeGenreMap.get(genre), youtubeMax)),
+        backgroundColor: 'rgba(255,84,84,0.45)',
+        borderColor: '#ff5454',
         borderWidth: 1
       }
     ]
@@ -281,16 +296,46 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
 
   const spotifyTotal = sumMapValues(spotifyGenreMap);
   const soundcloudTotal = sumMapValues(soundcloudGenreMap);
+  const youtubeTotal = sumMapValues(youtubeGenreMap);
   const savedTotal = sumMapValues(savedGenreMap);
   const hasLinkedSoundcloud = Boolean(soundcloudProfile?.username || soundcloudProfile?.permalink_url);
   const soundcloudNeedsSync = hasLinkedSoundcloud && soundcloudTotal === 0;
+  const hasLinkedYoutube = Boolean(youtubeProfile?.channel_id || youtubeProfile?.channel_url || youtubeProfile?.channel_title);
+  const youtubeNeedsSync = hasLinkedYoutube && youtubeTotal === 0;
   const sourceData = {
-    labels: ['Spotify', 'SoundCloud', 'Saved Events'],
+    labels: ['Spotify', 'SoundCloud', 'YouTube', 'Saved Events'],
     datasets: [{
-      data: [spotifyTotal, soundcloudTotal, savedTotal],
-      backgroundColor: ['#1DB954', '#ff8c42', '#4fc3f7'],
+      data: [spotifyTotal, soundcloudTotal, youtubeTotal, savedTotal],
+      backgroundColor: ['#1DB954', '#ff8c42', '#ff5454', '#4fc3f7'],
       borderWidth: 1,
       borderColor: 'rgba(255,255,255,0.12)'
+    }]
+  };
+
+  const genreSpreadData = {
+    labels: topGenres.slice(0, 7).map((item) => item.genre),
+    datasets: [{
+      label: 'Cross-source resonance',
+      data: topGenres.slice(0, 7).map((item) => {
+        const genre = item.genre;
+        let sourceHits = 0;
+        if ((spotifyGenreMap.get(genre) || 0) > 0) sourceHits += 1;
+        if ((soundcloudGenreMap.get(genre) || 0) > 0) sourceHits += 1;
+        if ((youtubeGenreMap.get(genre) || 0) > 0) sourceHits += 1;
+        if ((savedGenreMap.get(genre) || 0) > 0) sourceHits += 1;
+        return sourceHits;
+      }),
+      backgroundColor: [
+        'rgba(29,185,84,0.65)',
+        'rgba(255,140,66,0.65)',
+        'rgba(255,84,84,0.65)',
+        'rgba(79,195,247,0.65)',
+        'rgba(167,139,250,0.65)',
+        'rgba(0,214,125,0.65)',
+        'rgba(255,215,0,0.65)'
+      ],
+      borderColor: 'rgba(255,255,255,0.2)',
+      borderWidth: 1
     }]
   };
 
@@ -304,6 +349,41 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
       }
     }
   };
+
+  const genreSpreadOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      r: {
+        min: 0,
+        max: 4,
+        ticks: { stepSize: 1, color: '#a0a0a0', backdropColor: 'transparent' },
+        grid: { color: 'rgba(255,255,255,0.08)' },
+        pointLabels: { color: '#e8e8e8', font: { size: 11, weight: 600 } }
+      }
+    },
+    plugins: {
+      legend: { display: false }
+    }
+  };
+
+  const sourceTotals = [spotifyTotal, soundcloudTotal, youtubeTotal, savedTotal];
+  const nonZeroSourceTotals = sourceTotals.filter((value) => value > 0);
+  const combinedSignalStrength = sourceTotals.reduce((sum, value) => sum + value, 0);
+  const crossSourceGenres = topGenres.filter((item) => {
+    const genre = item.genre;
+    let hits = 0;
+    if ((spotifyGenreMap.get(genre) || 0) > 0) hits += 1;
+    if ((soundcloudGenreMap.get(genre) || 0) > 0) hits += 1;
+    if ((youtubeGenreMap.get(genre) || 0) > 0) hits += 1;
+    if ((savedGenreMap.get(genre) || 0) > 0) hits += 1;
+    return hits >= 2;
+  }).length;
+  const sourceBalance = nonZeroSourceTotals.length > 1
+    ? Math.round((Math.min(...nonZeroSourceTotals) / Math.max(...nonZeroSourceTotals)) * 100)
+    : (nonZeroSourceTotals.length === 1 ? 100 : 0);
+  const tasteDepth = Math.min(100, Math.round((combinedSignalStrength / 140) * 100));
+  const blendScore = Math.min(100, Math.round(((crossSourceGenres * 12) + (sourceBalance * 0.4))));
 
   const diversity = topGenres.length >= 5 ? 'High' : topGenres.length >= 3 ? 'Medium' : 'Focused';
   const diversityColor = diversity === 'High' ? '#00d67d' : diversity === 'Medium' ? '#f5a623' : '#4fc3f7';
@@ -342,11 +422,16 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
               Your Taste Profile
             </h3>
             <p style={{ fontSize: '0.78rem', color: '#a0a0a0' }}>
-              Built from Spotify, SoundCloud, and {savedEvents.length} saved events
+              Built from Spotify, SoundCloud, YouTube, and {savedEvents.length} saved events
             </p>
             {soundcloudNeedsSync && (
               <p style={{ fontSize: '0.72rem', color: '#ff8c42', marginTop: '0.25rem' }}>
                 SoundCloud is linked but no genre signals were found yet. Press Sync after liking tracks.
+              </p>
+            )}
+            {youtubeNeedsSync && (
+              <p style={{ fontSize: '0.72rem', color: '#ff6d6d', marginTop: '0.2rem' }}>
+                YouTube is linked but no genre signals were found yet. Sync after posting or updating channel videos.
               </p>
             )}
           </div>
@@ -365,6 +450,34 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
         </div>
       </div>
 
+      <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', marginBottom: '1rem' }}>
+        {[
+          { label: 'Signal strength', value: `${tasteDepth}%`, hint: `${combinedSignalStrength} weighted signals` },
+          { label: 'Blend score', value: `${blendScore}%`, hint: `${crossSourceGenres} shared genres` },
+          { label: 'Source balance', value: `${sourceBalance}%`, hint: 'Lower means one source dominates' }
+        ].map((metric) => (
+          <div
+            key={metric.label}
+            style={{
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 10,
+              padding: '0.7rem 0.8rem',
+              background: 'rgba(255,255,255,0.02)'
+            }}
+          >
+            <div style={{ fontSize: '0.68rem', color: '#9a9a9a', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.2rem' }}>
+              {metric.label}
+            </div>
+            <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#f4f4f4', lineHeight: 1.1 }}>
+              {metric.value}
+            </div>
+            <div style={{ fontSize: '0.7rem', color: '#8c8c8c', marginTop: '0.2rem' }}>
+              {metric.hint}
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', marginBottom: '1rem' }}>
         <div style={{ height: 280 }}>
           <Radar data={radarData} options={radarOptions} />
@@ -374,6 +487,9 @@ const TasteProfilePanel = ({ reloadToken = '' }) => {
         </div>
         <div style={{ height: 280 }}>
           <Doughnut data={sourceData} options={sourceOptions} />
+        </div>
+        <div style={{ height: 280 }}>
+          <PolarArea data={genreSpreadData} options={genreSpreadOptions} />
         </div>
       </div>
 

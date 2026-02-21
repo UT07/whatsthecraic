@@ -119,6 +119,16 @@ Required env:
 Local redirect example:
 - `http://localhost:3001/auth/spotify/callback`
 
+## YouTube Taste Sync (Implemented)
+- `GET /auth/youtube/status`
+- `POST /auth/youtube/connect` with `{ "profile": "<channel-url|@handle|channel-id>" }`
+- `POST /auth/youtube/sync`
+- `GET /auth/youtube/profile`
+- `DELETE /auth/youtube/disconnect`
+
+Required env:
+- `YOUTUBE_API_KEY`
+
 ## Ingestion
 Sources supported:
 - Ticketmaster (Discovery API)
@@ -153,6 +163,7 @@ Manual run (inside `events-service`):
 - See `docs/ops-runbook.md` for verification and recovery steps.
 - Secrets must be injected at runtime; do not commit `.env`.
 - Make sure your runtime secrets include `SOUNDCLOUD_CLIENT_ID`/`SOUNDCLOUD_CLIENT_SECRET`; otherwise SoundCloud enrichment/image coverage will stay limited.
+- Add `YOUTUBE_API_KEY` at runtime to enable YouTube taste sync and chart coverage.
 
 ## Frontends
 Primary UI:

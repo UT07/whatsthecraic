@@ -11,6 +11,7 @@ import { fetchArtistImage, resolveEventImage } from '../utils/imageUtils';
 import { groupEventsForDisplay, normalizeRecommendationEvent } from '../utils/eventGrouping';
 import { ExplainabilityModal, TasteProfilePanel, FeedbackButtons, EventDensityHeatMap } from '../components/ml';
 import MixcloudPlayer from '../components/MixcloudPlayer';
+import YouTubePlayer from '../components/YouTubePlayer';
 
 const formatDate = (iso) => {
   if (!iso) return 'TBA';
@@ -76,15 +77,27 @@ const getTopGenresFromSoundCloudProfile = (profile, limit = 5) => uniqueTokens(
   limit
 );
 
-const buildTasteQuery = (spotifyProfile, soundcloudProfile) => {
+const getTopArtistsFromYouTubeProfile = (profile, limit = 3) => uniqueTokens(
+  (profile?.top_artists || []).map((item) => (typeof item === 'string' ? item : item?.name || item)),
+  limit
+);
+
+const getTopGenresFromYouTubeProfile = (profile, limit = 5) => uniqueTokens(
+  (profile?.top_genres || []).map((item) => (typeof item === 'string' ? item : item?.genre || item)),
+  limit
+);
+
+const buildTasteQuery = (spotifyProfile, soundcloudProfile, youtubeProfile) => {
   const artists = uniqueTokens([
     ...getTopArtistsFromProfile(spotifyProfile, 2),
-    ...getTopArtistsFromSoundCloudProfile(soundcloudProfile, 2)
-  ], 3);
+    ...getTopArtistsFromSoundCloudProfile(soundcloudProfile, 2),
+    ...getTopArtistsFromYouTubeProfile(youtubeProfile, 2)
+  ], 4);
   const genres = uniqueTokens([
     ...getTopGenresFromProfile(spotifyProfile, 4),
-    ...getTopGenresFromSoundCloudProfile(soundcloudProfile, 4)
-  ], 5);
+    ...getTopGenresFromSoundCloudProfile(soundcloudProfile, 4),
+    ...getTopGenresFromYouTubeProfile(youtubeProfile, 4)
+  ], 6);
   const tokens = [...artists, ...genres];
   return tokens.length > 0 ? tokens.join(' ') : DEFAULT_TASTE_QUERY;
 };
@@ -104,11 +117,13 @@ const extractGenreTokens = (genres) => {
   return [];
 };
 
-const buildMlContextFromTaste = (spotifyProfile, soundcloudProfile, soundcloudPerformers = []) => {
+const buildMlContextFromTaste = (spotifyProfile, soundcloudProfile, youtubeProfile, soundcloudPerformers = []) => {
   const spotifyArtists = getTopArtistsFromProfile(spotifyProfile, 8);
   const spotifyGenres = getTopGenresFromProfile(spotifyProfile, 8);
   const connectedSoundcloudArtists = getTopArtistsFromSoundCloudProfile(soundcloudProfile, 8);
   const connectedSoundcloudGenres = getTopGenresFromSoundCloudProfile(soundcloudProfile, 8);
+  const youtubeArtists = getTopArtistsFromYouTubeProfile(youtubeProfile, 8);
+  const youtubeGenres = getTopGenresFromYouTubeProfile(youtubeProfile, 8);
   const soundcloudArtists = uniqueTokens(
     [...connectedSoundcloudArtists, ...(soundcloudPerformers || []).map((performer) => performer?.name)],
     8
@@ -125,7 +140,9 @@ const buildMlContextFromTaste = (spotifyProfile, soundcloudProfile, soundcloudPe
     spotify_artists: spotifyArtists,
     spotify_genres: spotifyGenres,
     soundcloud_artists: soundcloudArtists,
-    soundcloud_genres: soundcloudGenres
+    soundcloud_genres: soundcloudGenres,
+    youtube_artists: youtubeArtists,
+    youtube_genres: youtubeGenres
   };
 };
 
@@ -432,10 +449,13 @@ const Dashboard = () => {
   const [djs, setDjs] = useState([]);
   const [venues, setVenues] = useState([]);
   const [mixcloudArtists, setMixcloudArtists] = useState([]);
+  const [youtubeArtists, setYoutubeArtists] = useState([]);
   const [spotifyStatus, setSpotifyStatus] = useState(null);
   const [spotifyProfile, setSpotifyProfile] = useState(null);
   const [soundcloudStatus, setSoundcloudStatus] = useState(null);
   const [soundcloudProfile, setSoundcloudProfile] = useState(null);
+  const [youtubeStatus, setYoutubeStatus] = useState(null);
+  const [youtubeProfile, setYoutubeProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeGenre, setActiveGenre] = useState('All');
   const [savedIds, setSavedIds] = useState(new Set());
@@ -478,6 +498,8 @@ const Dashboard = () => {
       setSpotifyProfile(null);
       setSoundcloudStatus(null);
       setSoundcloudProfile(null);
+      setYoutubeStatus(null);
+      setYoutubeProfile(null);
       return;
     }
 
@@ -512,6 +534,22 @@ const Dashboard = () => {
         setSoundcloudStatus(null);
         setSoundcloudProfile(null);
       });
+
+    authAPI.getYouTubeStatus()
+      .then((status) => {
+        setYoutubeStatus(status);
+        if (!status?.linked) {
+          setYoutubeProfile(null);
+          return;
+        }
+        authAPI.getYouTubeProfile()
+          .then(setYoutubeProfile)
+          .catch(() => setYoutubeProfile(null));
+      })
+      .catch(() => {
+        setYoutubeStatus(null);
+        setYoutubeProfile(null);
+      });
   }, [token]);
 
   useEffect(() => {
@@ -528,7 +566,7 @@ const Dashboard = () => {
     };
 
     const loadTasteDrivenData = async () => {
-      const tasteQuery = buildTasteQuery(spotifyProfile, soundcloudProfile);
+      const tasteQuery = buildTasteQuery(spotifyProfile, soundcloudProfile, youtubeProfile);
 
       try {
         let mixcloudPerformers = [];
@@ -558,6 +596,41 @@ const Dashboard = () => {
         }
       }
 
+      try {
+        let youtubePerformers = [];
+        const youtubeData = await eventsAPI.getPerformers({
+          include: 'youtube',
+          q: tasteQuery,
+          limit: 12
+        });
+        youtubePerformers = Array.isArray(youtubeData?.performers) ? youtubeData.performers : [];
+
+        if (youtubePerformers.length === 0 && tasteQuery !== DEFAULT_TASTE_QUERY) {
+          const fallbackYoutube = await eventsAPI.getPerformers({
+            include: 'youtube',
+            q: DEFAULT_TASTE_QUERY,
+            limit: 12
+          });
+          youtubePerformers = Array.isArray(fallbackYoutube?.performers) ? fallbackYoutube.performers : [];
+        }
+
+        if (!cancelled) {
+          setYoutubeArtists(
+            dedupeByName(
+              youtubePerformers.filter((item) =>
+                !item?.is_youtube_org
+                && (item?.youtubeUrl || item?.latestYoutubeUrl || item?.youtubeVideoId)
+              )
+            )
+          );
+        }
+      } catch (error) {
+        console.error('YouTube load error:', error);
+        if (!cancelled) {
+          setYoutubeArtists([]);
+        }
+      }
+
       if (!token) {
         return;
       }
@@ -569,7 +642,7 @@ const Dashboard = () => {
           limit: 30
         });
         const soundcloudPerformers = Array.isArray(soundcloudData?.performers) ? soundcloudData.performers : [];
-        const context = buildMlContextFromTaste(spotifyProfile, soundcloudProfile, soundcloudPerformers);
+        const context = buildMlContextFromTaste(spotifyProfile, soundcloudProfile, youtubeProfile, soundcloudPerformers);
         const recommendationData = await mlAPI.getRecommendations({
           limit: 12,
           context
@@ -590,7 +663,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [token, spotifyProfile, soundcloudProfile]);
+  }, [token, spotifyProfile, soundcloudProfile, youtubeProfile]);
 
   const handleSave = async (id) => {
     try {
@@ -619,13 +692,45 @@ const Dashboard = () => {
     setExplainModalOpen(true);
   };
 
+  const refreshSpotify = () => {
+    authAPI.getSpotifyStatus()
+      .then((status) => {
+        setSpotifyStatus(status);
+        if (!status?.linked) {
+          setSpotifyProfile(null);
+          return;
+        }
+        authAPI.getSpotifyProfile().then(setSpotifyProfile).catch(() => setSpotifyProfile(null));
+      })
+      .catch(() => {
+        setSpotifyStatus(null);
+        setSpotifyProfile(null);
+      });
+  };
+
+  const handleConnectSpotify = async () => {
+    const profile = window.prompt('Enter your Spotify profile URL or user id (example: https://open.spotify.com/user/<id>)');
+    if (!profile || !profile.trim()) return;
+    try {
+      await authAPI.connectSpotify({ profile: profile.trim() });
+      refreshSpotify();
+    } catch (error) {
+      console.error('Spotify manual connect failed:', error);
+      const backendMessage = error?.response?.data?.error?.message || null;
+      window.alert(backendMessage
+        ? `Could not connect Spotify profile: ${backendMessage}`
+        : 'Could not connect Spotify profile. Please check the profile URL/user id and try again.');
+    }
+  };
+
   const handleSyncSpotify = () => {
     authAPI.syncSpotify()
       .then(() => {
-        authAPI.getSpotifyStatus().then(setSpotifyStatus).catch(() => {});
-        authAPI.getSpotifyProfile().then(setSpotifyProfile).catch(() => {});
+        refreshSpotify();
       })
-      .catch(() => {});
+      .catch((error) => {
+        console.error('Spotify sync failed:', error);
+      });
   };
 
   const refreshSoundCloud = () => {
@@ -664,6 +769,45 @@ const Dashboard = () => {
       setSoundcloudProfile(null);
     } catch (error) {
       console.error('SoundCloud disconnect failed:', error);
+    }
+  };
+
+  const refreshYouTube = () => {
+    authAPI.getYouTubeStatus().then(setYoutubeStatus).catch(() => setYoutubeStatus(null));
+    authAPI.getYouTubeProfile().then(setYoutubeProfile).catch(() => setYoutubeProfile(null));
+  };
+
+  const handleConnectYouTube = async () => {
+    const profile = window.prompt('Enter your YouTube channel URL, handle (@name), or channel id');
+    if (!profile || !profile.trim()) return;
+    try {
+      await authAPI.connectYouTube({ profile: profile.trim() });
+      refreshYouTube();
+    } catch (error) {
+      console.error('YouTube connect failed:', error);
+      const backendMessage = error?.response?.data?.error?.message || null;
+      window.alert(backendMessage
+        ? `Could not connect YouTube: ${backendMessage}`
+        : 'Could not connect YouTube. Please check the channel URL/handle/channel id and try again.');
+    }
+  };
+
+  const handleSyncYouTube = async () => {
+    try {
+      await authAPI.syncYouTube();
+      refreshYouTube();
+    } catch (error) {
+      console.error('YouTube sync failed:', error);
+    }
+  };
+
+  const handleDisconnectYouTube = async () => {
+    try {
+      await authAPI.disconnectYouTube();
+      setYoutubeStatus({ linked: false });
+      setYoutubeProfile(null);
+    } catch (error) {
+      console.error('YouTube disconnect failed:', error);
     }
   };
 
@@ -742,7 +886,11 @@ const Dashboard = () => {
     .slice(0, 12);
 
   // 4. By Genre grouping
-  const topUserGenres = spotifyProfile?.top_genres?.slice(0, 3) || [];
+  const topUserGenres = uniqueTokens([
+    ...getTopGenresFromProfile(spotifyProfile, 4),
+    ...getTopGenresFromSoundCloudProfile(soundcloudProfile, 4),
+    ...getTopGenresFromYouTubeProfile(youtubeProfile, 4)
+  ], 3);
   const eventsByGenre = topUserGenres.map((genreObj) => {
     const genreName = typeof genreObj === 'object' ? genreObj.genre : genreObj;
     return {
@@ -932,9 +1080,18 @@ const Dashboard = () => {
           </div>
           <div style={{ flex: 1 }}>
             <h3 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.2rem' }}>Get personalized picks</h3>
-            <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>Connect Spotify to see events matched to your music taste</p>
+            <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>
+              {spotifyStatus?.oauth_configured === false
+                ? 'Spotify OAuth is not fully configured on the backend right now. You can still connect a Spotify profile URL/user id.'
+                : 'Connect Spotify via OAuth or add your Spotify profile URL/user id to personalize recommendations.'}
+            </p>
           </div>
-          <a className="btn" href={`${authBase}/auth/spotify/login?token=${token}`}>Connect Spotify</a>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {spotifyStatus?.oauth_configured !== false && (
+              <a className="btn" href={`${authBase}/auth/spotify/login?token=${token}`}>Connect Spotify</a>
+            )}
+            <button className="btn btn-ghost" onClick={handleConnectSpotify}>Use profile URL</button>
+          </div>
         </motion.section>
       )}
 
@@ -999,42 +1156,111 @@ const Dashboard = () => {
         </motion.section>
       )}
 
+      {/* ─── YOUTUBE CTA (not linked) ─── */}
+      {token && !youtubeStatus?.linked && (
+        <motion.section
+          className="spotify-cta animate-fade-up"
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+          style={{ borderColor: 'rgba(255,84,84,0.35)', background: 'linear-gradient(135deg, rgba(255,84,84,0.14), rgba(0,0,0,0))' }}
+        >
+          <div className="spotify-cta-icon" style={{ background: 'rgba(255,84,84,0.25)', color: '#ff5454' }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M10 15l5.19-3L10 9v6zm12-3c0 2.31-.19 4.14-.52 5.48-.3 1.2-1.24 2.14-2.44 2.44C17.7 20.25 15.86 20.44 13.55 20.44h-3.1c-2.31 0-4.15-.19-5.49-.52-1.2-.3-2.14-1.24-2.44-2.44C2.19 16.14 2 14.31 2 12s.19-4.14.52-5.48c.3-1.2 1.24-2.14 2.44-2.44C6.3 3.75 8.14 3.56 10.45 3.56h3.1c2.31 0 4.15.19 5.49.52 1.2.3 2.14 1.24 2.44 2.44.33 1.34.52 3.17.52 5.48z" />
+            </svg>
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.2rem' }}>Add YouTube taste</h3>
+            <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>
+              {youtubeStatus?.configured === false
+                ? 'YouTube integration is unavailable. Add YOUTUBE_API_KEY in runtime secrets.'
+                : 'Connect your YouTube channel URL/handle to bring in a third taste source for recommendations.'}
+            </p>
+          </div>
+          <button className="btn" onClick={handleConnectYouTube}>
+            Connect YouTube
+          </button>
+        </motion.section>
+      )}
+
+      {/* ─── YOUTUBE PROFILE (linked) ─── */}
+      {token && youtubeStatus?.linked && (
+        <motion.section
+          className="card"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{
+            padding: '1rem 1.25rem',
+            borderColor: 'rgba(255,84,84,0.28)',
+            background: 'linear-gradient(135deg, rgba(255,84,84,0.08), rgba(0,0,0,0))'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.9rem' }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>
+                YouTube connected
+                {youtubeStatus?.channel_title && <span style={{ color: 'var(--muted)', marginLeft: 8, fontWeight: 500 }}>{youtubeStatus.channel_title}</span>}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+                {youtubeStatus?.last_synced_at ? `Synced ${new Date(youtubeStatus.last_synced_at).toLocaleDateString('en-IE')}` : 'Sync to refresh your YouTube taste profile'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <button className="btn btn-sm btn-ghost" onClick={handleSyncYouTube}>Sync</button>
+              <button className="btn btn-sm btn-ghost" onClick={handleDisconnectYouTube}>Disconnect</button>
+            </div>
+          </div>
+        </motion.section>
+      )}
+
       {/* ─── TASTE PROFILE PANEL ─── */}
-      {token && (spotifyStatus?.linked || soundcloudStatus?.linked) && (
+      {token && (spotifyStatus?.linked || soundcloudStatus?.linked || youtubeStatus?.linked) && (
         <TasteProfilePanel
-          reloadToken={`${spotifyStatus?.last_synced_at || ''}|${soundcloudStatus?.last_synced_at || ''}|${savedIds.size}`}
+          reloadToken={`${spotifyStatus?.last_synced_at || ''}|${soundcloudStatus?.last_synced_at || ''}|${youtubeStatus?.last_synced_at || ''}|${savedIds.size}`}
         />
       )}
 
-      {/* ─── MIXCLOUD LIVE STREAMS ─── */}
-      {mixcloudArtists.length > 0 && (
+      {/* ─── LIVE STREAMS + VIDEO SETS ─── */}
+      {(mixcloudArtists.length > 0 || youtubeArtists.length > 0) && (
         <section>
           <div className="section-header">
-            <h2 className="section-header-title">Mixcloud live streams</h2>
+            <h2 className="section-header-title">Live streams & video sets</h2>
             <Link to="/djs" className="section-header-link">All artists &rarr;</Link>
           </div>
           <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
-            {mixcloudArtists.slice(0, 6).map((artist, index) => (
+            {[...mixcloudArtists.slice(0, 4), ...youtubeArtists.slice(0, 4)].map((artist, index) => {
+              const source = (artist?.source || '').toLowerCase() === 'youtube' ? 'youtube' : (artist?.youtubeUrl || artist?.latestYoutubeUrl || artist?.youtubeVideoId ? 'youtube' : 'mixcloud');
+              return (
               <motion.div
                 key={`${artist.name}-${index}`}
                 className="card"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.04 }}
-                style={{ padding: '1rem', borderColor: 'rgba(82,177,252,0.2)' }}
+                style={{ padding: '1rem', borderColor: source === 'youtube' ? 'rgba(255,84,84,0.28)' : 'rgba(82,177,252,0.2)' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.6rem' }}>
                   <h3 style={{ fontWeight: 700, fontSize: '0.92rem' }} className="line-clamp-1">{artist.name}</h3>
-                  <span className="chip" style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>mixcloud</span>
+                  <span className="chip" style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>
+                    {source}
+                  </span>
                 </div>
-                <MixcloudPlayer
-                  mixcloudUrl={artist.latestMixcloudUrl || artist.mixcloudUrl}
-                  artistName={artist.name}
-                  height={150}
-                  allowLookup={false}
-                />
+                {source === 'youtube' ? (
+                  <YouTubePlayer
+                    youtubeUrl={artist.latestYoutubeUrl || artist.youtubeUrl}
+                    videoId={artist.youtubeVideoId}
+                    height={150}
+                  />
+                ) : (
+                  <MixcloudPlayer
+                    mixcloudUrl={artist.latestMixcloudUrl || artist.mixcloudUrl}
+                    artistName={artist.name}
+                    height={150}
+                    allowLookup={false}
+                  />
+                )}
               </motion.div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
