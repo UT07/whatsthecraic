@@ -54,6 +54,7 @@ const YOUTUBE_CLIENT_ID = process.env.YOUTUBE_CLIENT_ID || null;
 const YOUTUBE_CLIENT_SECRET = process.env.YOUTUBE_CLIENT_SECRET || null;
 const YOUTUBE_REDIRECT_URI = process.env.YOUTUBE_REDIRECT_URI || null;
 const YOUTUBE_SCOPES = process.env.YOUTUBE_SCOPES || 'https://www.googleapis.com/auth/youtube.readonly';
+const FRONTEND_APP_URL = (process.env.FRONTEND_APP_URL || 'https://whatsthecraic.run.place').replace(/\/+$/, '');
 const YOUTUBE_SYNC_CACHE_TTL_MS = Number.parseInt(process.env.YOUTUBE_SYNC_CACHE_TTL_MS || `${20 * 60 * 1000}`, 10);
 const YOUTUBE_HTTP_CACHE_TTL_MS = Number.parseInt(process.env.YOUTUBE_HTTP_CACHE_TTL_MS || `${15 * 60 * 1000}`, 10);
 const YOUTUBE_HTTP_STALE_MS = Number.parseInt(process.env.YOUTUBE_HTTP_STALE_MS || `${5 * 60 * 1000}`, 10);
@@ -389,6 +390,61 @@ const youtubeOAuthMissingConfig = () => {
   if (!YOUTUBE_CLIENT_SECRET) missing.push('YOUTUBE_CLIENT_SECRET');
   if (!YOUTUBE_REDIRECT_URI) missing.push('YOUTUBE_REDIRECT_URI');
   return missing;
+};
+
+const isSafeFrontendReturnTo = (value) => {
+  if (!value || typeof value !== 'string') return false;
+  try {
+    const candidate = new URL(value);
+    if (!['http:', 'https:'].includes(candidate.protocol)) return false;
+    const defaultHost = new URL(FRONTEND_APP_URL).hostname;
+    const host = candidate.hostname;
+    return host === defaultHost || host === 'localhost' || host === '127.0.0.1';
+  } catch {
+    return false;
+  }
+};
+
+const resolveYouTubeReturnTo = (value) => {
+  if (isSafeFrontendReturnTo(value)) return value;
+  return `${FRONTEND_APP_URL}/dashboard`;
+};
+
+const buildYouTubeFrontendRedirectUrl = (value, params = {}) => {
+  const target = new URL(resolveYouTubeReturnTo(value));
+  Object.entries(params).forEach(([key, paramValue]) => {
+    if (paramValue === null || paramValue === undefined || paramValue === '') return;
+    target.searchParams.set(key, String(paramValue));
+  });
+  return target.toString();
+};
+
+const wantsHtmlResponse = (req) => {
+  const accept = (req.headers.accept || '').toLowerCase();
+  return accept.includes('text/html') || accept.includes('application/xhtml+xml');
+};
+
+const sendYouTubeOAuthCallbackResponse = (req, res, { payload = null, success = false, result = null, error = null }) => {
+  const returnTo = payload?.return_to || null;
+  if (wantsHtmlResponse(req) || returnTo) {
+    if (success) {
+      return res.redirect(buildYouTubeFrontendRedirectUrl(returnTo, {
+        youtube_oauth: 'success',
+        youtube_linked: '1'
+      }));
+    }
+    return res.redirect(buildYouTubeFrontendRedirectUrl(returnTo, {
+      youtube_oauth: 'error',
+      error_code: error?.code || 'youtube_error'
+    }));
+  }
+  if (success) {
+    return res.json({
+      linked: true,
+      ...result
+    });
+  }
+  return sendError(res, error?.status || 500, error?.code || 'youtube_error', error?.message || 'YouTube error');
 };
 
 const normalizeSoundcloudToken = (value) => (value || '')
@@ -2985,12 +3041,18 @@ app.get('/auth/youtube/login', (req, res) => {
   const authHeader = req.headers.authorization || '';
   const headerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
   const queryToken = typeof req.query.token === 'string' ? req.query.token : null;
+  const returnTo = typeof req.query.return_to === 'string' ? req.query.return_to : null;
   const userId = getUserIdFromToken(headerToken) || getUserIdFromToken(queryToken);
   if (!userId) {
     return sendError(res, 401, 'unauthorized', 'Missing bearer token');
   }
   const state = jwt.sign(
-    { user_id: userId, provider: 'youtube', nonce: crypto.randomUUID() },
+    {
+      user_id: userId,
+      provider: 'youtube',
+      nonce: crypto.randomUUID(),
+      ...(isSafeFrontendReturnTo(returnTo) ? { return_to: returnTo } : {})
+    },
     JWT_SECRET,
     { expiresIn: '10m' }
   );
@@ -3010,17 +3072,38 @@ app.get('/auth/youtube/callback', async (req, res) => {
 
   const { code, state, error } = req.query;
   if (error) {
-    return sendError(res, 400, 'youtube_auth_failed', `YouTube auth failed: ${error}`);
+    return sendYouTubeOAuthCallbackResponse(req, res, {
+      success: false,
+      error: {
+        status: 400,
+        code: 'youtube_auth_failed',
+        message: `YouTube auth failed: ${error}`
+      }
+    });
   }
   if (!code || !state) {
-    return sendError(res, 400, 'invalid_request', 'Missing code or state');
+    return sendYouTubeOAuthCallbackResponse(req, res, {
+      success: false,
+      error: {
+        status: 400,
+        code: 'invalid_request',
+        message: 'Missing code or state'
+      }
+    });
   }
 
   let payload;
   try {
     payload = jwt.verify(state, JWT_SECRET);
   } catch {
-    return sendError(res, 400, 'invalid_state', 'Invalid or expired state');
+    return sendYouTubeOAuthCallbackResponse(req, res, {
+      success: false,
+      error: {
+        status: 400,
+        code: 'invalid_state',
+        message: 'Invalid or expired state'
+      }
+    });
   }
 
   try {
@@ -3078,16 +3161,33 @@ app.get('/auth/youtube/callback', async (req, res) => {
     });
 
     const result = await syncYoutubeOAuthProfile(payload.user_id);
-    return res.json({
-      linked: true,
-      ...result
+    return sendYouTubeOAuthCallbackResponse(req, res, {
+      payload,
+      success: true,
+      result
     });
   } catch (err) {
     console.error('YouTube callback error:', err.message);
     if (isDatabaseConnectionError(err)) {
-      return sendError(res, 503, 'database_unavailable', 'Database is currently unavailable');
+      return sendYouTubeOAuthCallbackResponse(req, res, {
+        payload,
+        success: false,
+        error: {
+          status: 503,
+          code: 'database_unavailable',
+          message: 'Database is currently unavailable'
+        }
+      });
     }
-    return sendError(res, err.status || 500, 'youtube_error', err.message || 'YouTube error');
+    return sendYouTubeOAuthCallbackResponse(req, res, {
+      payload,
+      success: false,
+      error: {
+        status: err.status || 500,
+        code: 'youtube_error',
+        message: err.message || 'YouTube error'
+      }
+    });
   }
 });
 
