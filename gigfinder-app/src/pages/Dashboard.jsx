@@ -1172,13 +1172,22 @@ const Dashboard = () => {
             <h3 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.2rem' }}>Add YouTube taste</h3>
             <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>
               {youtubeStatus?.configured === false
-                ? 'YouTube integration is unavailable. Add YOUTUBE_API_KEY in runtime secrets.'
-                : 'Connect your YouTube channel URL/handle to bring in a third taste source for recommendations.'}
+                ? 'YouTube integration is unavailable. Add YOUTUBE_API_KEY or YouTube OAuth runtime secrets (YOUTUBE_CLIENT_ID/YOUTUBE_CLIENT_SECRET/YOUTUBE_REDIRECT_URI).'
+                : (youtubeStatus?.oauth_configured !== false
+                  ? 'Connect YouTube once via OAuth to sync your actual likes/subscriptions and use them in recommendations.'
+                  : 'OAuth is not configured yet. You can still link a YouTube channel URL/handle as a fallback.')}
             </p>
           </div>
-          <button className="btn" onClick={handleConnectYouTube}>
-            Connect YouTube
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {youtubeStatus?.oauth_configured !== false && (
+              <a className="btn" href={`${authBase}/auth/youtube/login?token=${encodeURIComponent(token)}`}>
+                Connect YouTube
+              </a>
+            )}
+            <button className="btn btn-ghost" onClick={handleConnectYouTube}>
+              Use channel URL
+            </button>
+          </div>
         </motion.section>
       )}
 

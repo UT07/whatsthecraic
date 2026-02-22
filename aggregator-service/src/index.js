@@ -147,10 +147,23 @@ const proxyRequest = async (req, res, { url, method = 'get' }) => {
       method,
       params: req.query,
       data: req.body,
+      maxRedirects: 0,
+      validateStatus: () => true,
       headers: {
         Authorization: req.headers.authorization || ''
       }
     });
+    if ([301, 302, 303, 307, 308].includes(response.status) && response.headers?.location) {
+      res.set('Location', response.headers.location);
+      return res.status(response.status).send(response.data || '');
+    }
+    const contentType = (response.headers?.['content-type'] || '').toLowerCase();
+    if (typeof response.data === 'string' && !contentType.includes('application/json')) {
+      if (response.headers?.['content-type']) {
+        res.set('Content-Type', response.headers['content-type']);
+      }
+      return res.status(response.status).send(response.data);
+    }
     return res.status(response.status).json(response.data);
   } catch (error) {
     const status = error.response?.status || 502;
@@ -191,6 +204,8 @@ app.post('/v1/auth/soundcloud/sync', (req, res) => proxyRequest(req, res, { url:
 app.get('/v1/auth/soundcloud/profile', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/soundcloud/profile` }));
 app.delete('/v1/auth/soundcloud/disconnect', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/soundcloud/disconnect`, method: 'delete' }));
 app.get('/v1/auth/youtube/status', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/youtube/status` }));
+app.get('/v1/auth/youtube/login', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/youtube/login` }));
+app.get('/v1/auth/youtube/callback', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/youtube/callback` }));
 app.post('/v1/auth/youtube/connect', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/youtube/connect`, method: 'post' }));
 app.post('/v1/auth/youtube/sync', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/youtube/sync`, method: 'post' }));
 app.get('/v1/auth/youtube/profile', (req, res) => proxyRequest(req, res, { url: `${AUTH_SERVICE_URL}/auth/youtube/profile` }));
