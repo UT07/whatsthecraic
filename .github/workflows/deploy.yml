@@ -70,42 +70,70 @@ jobs:
           SLEEP_SECONDS=10
           DEPLOY_TIMEOUT_SECONDS=2400
 
+          DEPLOY_COMMANDS_FILE="$RUNNER_TEMP/deploy-ssm-commands.txt"
+          DEPLOY_PARAMS_FILE="$RUNNER_TEMP/deploy-ssm-params.json"
+          export DEPLOY_COMMANDS_FILE DEPLOY_PARAMS_FILE
+
+          cat > "$DEPLOY_COMMANDS_FILE" <<'EOF'
+          set -euo pipefail
+          echo "Starting deployment at $(date)"
+          # Refresh ECR credentials
+          /usr/local/bin/ecr-refresh.sh
+          # Refresh Kubernetes image pull secret (ECR tokens expire every 12h)
+          export AWS_REGION=eu-west-1
+          export ECR_URL=385017713886.dkr.ecr.eu-west-1.amazonaws.com
+          export ECR_TOKEN=$(aws ecr get-login-password --region $AWS_REGION)
+          kubectl create secret docker-registry ecr-registry -n whatsthecraic --docker-server=$ECR_URL --docker-username=AWS --docker-password="$ECR_TOKEN" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl patch serviceaccount whatsthecraic-sa -n whatsthecraic -p '{"imagePullSecrets":[{"name":"ecr-registry"}]}'
+          sleep 5
+          # Apply latest manifests (HPA/PDB/Ingress/Config) before image rollout
+          if [ -d /home/ec2-user/whatsthecraic/.git ]; then cd /home/ec2-user/whatsthecraic && (git fetch origin master && git checkout master && git pull --ff-only || echo "Manifest repo refresh skipped"); fi
+          if [ -d /home/ec2-user/whatsthecraic/k8s ]; then kubectl apply -k /home/ec2-user/whatsthecraic/k8s; else echo "No k8s manifests found on host, skipping apply"; fi
+          kubectl get hpa -n whatsthecraic || true
+          kubectl get pdb -n whatsthecraic || true
+          # Update image tags to specific commit SHA
+          export IMAGE_TAG='__IMAGE_TAG__'
+          kubectl set image deployment/auth-service auth-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/auth-service:$IMAGE_TAG -n whatsthecraic
+          kubectl set image deployment/events-service events-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/events-service:$IMAGE_TAG -n whatsthecraic
+          kubectl set image deployment/dj-service dj-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/dj-service:$IMAGE_TAG -n whatsthecraic
+          kubectl set image deployment/venue-service venue-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/venue-service:$IMAGE_TAG -n whatsthecraic
+          kubectl set image deployment/aggregator aggregator=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/aggregator-service:$IMAGE_TAG -n whatsthecraic
+          kubectl set image deployment/ml-service ml-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:$IMAGE_TAG -n whatsthecraic
+          # Wait for all deployments to complete
+          echo "Waiting for rollout to complete..."
+          kubectl rollout status deployment/auth-service -n whatsthecraic --timeout=180s
+          kubectl rollout status deployment/events-service -n whatsthecraic --timeout=180s
+          kubectl rollout status deployment/dj-service -n whatsthecraic --timeout=180s
+          kubectl rollout status deployment/venue-service -n whatsthecraic --timeout=180s
+          kubectl rollout status deployment/aggregator -n whatsthecraic --timeout=180s
+          kubectl rollout status deployment/ml-service -n whatsthecraic --timeout=180s
+          # Show deployment status
+          kubectl get pods -n whatsthecraic -o wide
+          echo "Deployment completed at $(date)"
+          EOF
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          commands_path = Path(os.environ["DEPLOY_COMMANDS_FILE"])
+          params_path = Path(os.environ["DEPLOY_PARAMS_FILE"])
+          image_tag = os.environ["IMAGE_TAG"]
+
+          commands = [
+              line.replace("__IMAGE_TAG__", image_tag)
+              for line in commands_path.read_text().splitlines()
+              if line.strip()
+          ]
+          params_path.write_text(json.dumps({"commands": commands}))
+          PY
+
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
             --timeout-seconds $DEPLOY_TIMEOUT_SECONDS \
-            --parameters '{"commands":[
-              "set -euo pipefail",
-              "echo \"Starting deployment at $(date)\"",
-              "# Refresh ECR credentials",
-              "/usr/local/bin/ecr-refresh.sh",
-              "# Refresh Kubernetes image pull secret (ECR tokens expire every 12h)",
-              "export AWS_REGION=eu-west-1",
-              "export ECR_URL=385017713886.dkr.ecr.eu-west-1.amazonaws.com",
-              "export ECR_TOKEN=$(aws ecr get-login-password --region $AWS_REGION)",
-              "kubectl create secret docker-registry ecr-registry -n whatsthecraic --docker-server=$ECR_URL --docker-username=AWS --docker-password=\"$ECR_TOKEN\" --dry-run=client -o yaml | kubectl apply -f -",
-              "kubectl patch serviceaccount whatsthecraic-sa -n whatsthecraic -p '{\"imagePullSecrets\":[{\"name\":\"ecr-registry\"}]}'",
-              "sleep 5",
-              "# Update image tags to specific commit SHA",
-              "export IMAGE_TAG='"$IMAGE_TAG"'",
-              "kubectl set image deployment/auth-service auth-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/auth-service:$IMAGE_TAG -n whatsthecraic",
-              "kubectl set image deployment/events-service events-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/events-service:$IMAGE_TAG -n whatsthecraic",
-              "kubectl set image deployment/dj-service dj-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/dj-service:$IMAGE_TAG -n whatsthecraic",
-              "kubectl set image deployment/venue-service venue-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/venue-service:$IMAGE_TAG -n whatsthecraic",
-              "kubectl set image deployment/aggregator aggregator=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/aggregator-service:$IMAGE_TAG -n whatsthecraic",
-              "kubectl set image deployment/ml-service ml-service=385017713886.dkr.ecr.eu-west-1.amazonaws.com/whatsthecraic/ml-service:$IMAGE_TAG -n whatsthecraic",
-              "# Wait for all deployments to complete",
-              "echo \"Waiting for rollout to complete...\"",
-              "kubectl rollout status deployment/auth-service -n whatsthecraic --timeout=180s",
-              "kubectl rollout status deployment/events-service -n whatsthecraic --timeout=180s",
-              "kubectl rollout status deployment/dj-service -n whatsthecraic --timeout=180s",
-              "kubectl rollout status deployment/venue-service -n whatsthecraic --timeout=180s",
-              "kubectl rollout status deployment/aggregator -n whatsthecraic --timeout=180s",
-              "kubectl rollout status deployment/ml-service -n whatsthecraic --timeout=180s",
-              "# Show deployment status",
-              "kubectl get pods -n whatsthecraic -o wide",
-              "echo \"Deployment completed at $(date)\""
-            ]}' \
+            --parameters "file://$DEPLOY_PARAMS_FILE" \
             --query 'Command.CommandId' --output text)
 
           echo "Waiting for deployment to complete (command: $COMMAND_ID)..."
