@@ -176,8 +176,9 @@ const MixcloudPlayer = ({
         src={iframeSrc}
         frameBorder="0"
         title="Mixcloud Player"
-        allow="autoplay"
-        loading="lazy"
+        allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+        allowFullScreen
+        loading="eager"
         referrerPolicy="no-referrer-when-downgrade"
         style={{ display: 'block' }}
       />

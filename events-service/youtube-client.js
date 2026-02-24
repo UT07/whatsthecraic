@@ -9,6 +9,7 @@ const CACHE_TTL_MS = Number.parseInt(process.env.YOUTUBE_CACHE_TTL_MS || `${15 *
 const CACHE_STALE_MS = Number.parseInt(process.env.YOUTUBE_CACHE_STALE_MS || `${5 * 60 * 1000}`, 10);
 const RATE_LIMIT_BACKOFF_MS = Number.parseInt(process.env.YOUTUBE_RATE_LIMIT_BACKOFF_MS || '60000', 10);
 const RETRY_ATTEMPTS = Number.parseInt(process.env.YOUTUBE_RETRY_ATTEMPTS || '2', 10);
+const CONFIG_ERROR_HOLD_MS = Number.parseInt(process.env.YOUTUBE_CONFIG_ERROR_HOLD_MS || `${10 * 60 * 1000}`, 10);
 const MAX_CACHE_SIZE = 1000;
 
 const ORG_KEYWORDS = [
@@ -117,6 +118,13 @@ const withCache = async (key, fn) => {
       }
       if (Number(err?.response?.status) === 429) {
         const holdUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
+        cache.set(key, {
+          value: [],
+          expiresAt: holdUntil,
+          staleUntil: holdUntil
+        });
+      } else if ([400, 403].includes(Number(err?.response?.status || 0))) {
+        const holdUntil = Date.now() + CONFIG_ERROR_HOLD_MS;
         cache.set(key, {
           value: [],
           expiresAt: holdUntil,

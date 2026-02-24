@@ -42,7 +42,15 @@ const YouTubePlayer = ({
 
   if (!resolvedVideoId) return null;
 
-  const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(resolvedVideoId)}?rel=0&modestbranding=1&playsinline=1`;
+  const origin = typeof window !== 'undefined' ? encodeURIComponent(window.location.origin) : '';
+  const params = [
+    'rel=0',
+    'modestbranding=1',
+    'playsinline=1',
+    'enablejsapi=1',
+    origin ? `origin=${origin}` : null
+  ].filter(Boolean).join('&');
+  const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(resolvedVideoId)}?${params}`;
 
   return (
     <div style={{
@@ -60,7 +68,7 @@ const YouTubePlayer = ({
         frameBorder="0"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
         allowFullScreen
-        loading="lazy"
+        loading="eager"
         referrerPolicy="strict-origin-when-cross-origin"
         style={{ display: 'block' }}
       />

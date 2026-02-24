@@ -615,12 +615,16 @@ const Dashboard = () => {
         }
 
         if (!cancelled) {
+          const artistChannels = youtubePerformers.filter((item) =>
+            !item?.is_youtube_org
+            && (item?.youtubeUrl || item?.latestYoutubeUrl || item?.youtubeVideoId)
+          );
+          const fallbackChannels = youtubePerformers.filter((item) =>
+            item?.youtubeUrl || item?.latestYoutubeUrl || item?.youtubeVideoId
+          );
           setYoutubeArtists(
             dedupeByName(
-              youtubePerformers.filter((item) =>
-                !item?.is_youtube_org
-                && (item?.youtubeUrl || item?.latestYoutubeUrl || item?.youtubeVideoId)
-              )
+              artistChannels.length > 0 ? artistChannels : fallbackChannels
             )
           );
         }
@@ -1238,9 +1242,17 @@ const Dashboard = () => {
           <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
             {[...mixcloudArtists.slice(0, 4), ...youtubeArtists.slice(0, 4)].map((artist, index) => {
               const source = (artist?.source || '').toLowerCase() === 'youtube' ? 'youtube' : (artist?.youtubeUrl || artist?.latestYoutubeUrl || artist?.youtubeVideoId ? 'youtube' : 'mixcloud');
+              const streamKey = [
+                source,
+                artist?.youtubeVideoId,
+                artist?.youtubeChannelId,
+                artist?.username,
+                artist?.latestMixcloudUrl || artist?.mixcloudUrl,
+                artist?.name
+              ].filter(Boolean).join(':');
               return (
               <motion.div
-                key={`${artist.name}-${index}`}
+                key={streamKey || `${artist.name}-${index}`}
                 className="card"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}

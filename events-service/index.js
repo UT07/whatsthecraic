@@ -2298,7 +2298,8 @@ app.get('/v1/performers', async (req, res) => {
         });
       });
     } catch (err) {
-      console.warn('[performers] YouTube search failed:', err.message);
+      const upstreamMessage = err?.response?.data?.error?.message || err?.response?.data?.error?.errors?.[0]?.reason || null;
+      console.warn('[performers] YouTube search failed:', upstreamMessage || err.message);
     }
   }
 
